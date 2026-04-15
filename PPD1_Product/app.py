@@ -1,7 +1,7 @@
 """
 ======================================================================================
 PPD-1 FLASK WEB APPLICATION — app.py
-Version: 5.4 (Corrected Edge-ResNet Fusion Math)
+Version: 5.4 (Gunicorn Production Fix)
 ======================================================================================
 """
 
@@ -57,6 +57,8 @@ v_scaler = p_scaler = v_interp = p_interp = detector = None
 
 def load_models():
     global MODELS_LOADED, v_scaler, p_scaler, v_interp, p_interp, detector
+    
+    print("[SYSTEM] Initializing AI Models for Production...")
 
     if not Path("face_landmarker.task").exists():
         print("[WARNING] face_landmarker.task not found — running in SIMULATION mode.")
@@ -93,35 +95,17 @@ def load_models():
     MODELS_LOADED = (detector is not None)
     print(f"[SYSTEM] PPD-1 V5 Engine ready. Models loaded: {MODELS_LOADED}")
 
+# ===================================================================
+# THE CRITICAL FIX: Force models to load globally during Gunicorn boot
+# ===================================================================
+load_models()
+
+
 def calc_ear(eye_pts: np.ndarray) -> float:
     A = dist.euclidean(eye_pts[1], eye_pts[5])
     B = dist.euclidean(eye_pts[2], eye_pts[4])
     C = dist.euclidean(eye_pts[0], eye_pts[3])
     return (A + B) / (2.0 * C) if C > 1e-6 else 0.0
-
-def check_dark_circles_lab(frame, landmarks, w, h):
-    """Restored LAB conversion logic from V5 python script to extract luminance"""
-    try:
-        lab_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
-        l_channel = lab_frame[:, :, 0] 
-        
-        l_eye_y, l_eye_x = int(landmarks[145].y * h), int(landmarks[145].x * w)
-        l_cheek_y, l_cheek_x = int(landmarks[205].y * h), int(landmarks[205].x * w)
-        r_eye_y, r_eye_x = int(landmarks[374].y * h), int(landmarks[374].x * w)
-        r_cheek_y, r_cheek_x = int(landmarks[425].y * h), int(landmarks[425].x * w)
-        
-        l_eye_lum = np.mean(l_channel[max(0, l_eye_y-5):l_eye_y+5, max(0, l_eye_x-5):l_eye_x+5])
-        l_cheek_lum = np.mean(l_channel[max(0, l_cheek_y-5):l_cheek_y+5, max(0, l_cheek_x-5):l_cheek_x+5])
-        r_eye_lum = np.mean(l_channel[max(0, r_eye_y-5):r_eye_y+5, max(0, r_eye_x-5):r_eye_x+5])
-        r_cheek_lum = np.mean(l_channel[max(0, r_cheek_y-5):r_cheek_y+5, max(0, r_cheek_x-5):r_cheek_x+5])
-        
-        l_ratio = l_eye_lum / (l_cheek_lum + 1e-6)
-        r_ratio = r_eye_lum / (r_cheek_lum + 1e-6)
-        
-        flag = 1.0 if (l_ratio < 0.85 or r_ratio < 0.85) else 0.0
-        return flag
-    except:
-        return 0.0
 
 def compute_v5_features(lm: list, blendshapes: list, h: int, w: int) -> dict:
     l_eye = np.array([(lm[i].x * w, lm[i].y * h) for i in LEFT_EYE])
@@ -175,14 +159,13 @@ def run_vision_model(v5_vector: np.ndarray) -> float:
         except Exception:
             pass
 
-    # Aggressive Surrogate Math (if TFLite is missing)
     ear = float(v5_vector[0]); etr = float(v5_vector[1])
     mar = float(v5_vector[2]); moe = float(v5_vector[3])
-    
-    ear_score = max(0.0, (0.28 - ear) / 0.15) * 0.45
-    etr_score = max(0.0, (0.42 - etr) / 0.15) * 0.35
-    mar_score = min(1.0, mar * 2.5) * 0.20
-    return float(np.clip(ear_score + etr_score + mar_score, 0.0, 1.0))
+    ear_score = max(0.0, (0.28 - ear) / 0.20)
+    etr_score = max(0.0, (0.42 - etr) / 0.22)
+    mar_score = min(1.0, mar * 2.0)
+    moe_score = min(1.0, moe * 0.4)
+    return float(np.clip(ear_score*0.40 + etr_score*0.30 + mar_score*0.18 + moe_score*0.12, 0.0, 1.0))
 
 def run_physiology_model(gsr: float, hrv: float, hr: float) -> float:
     if p_scaler is not None and p_interp is not None:
@@ -207,20 +190,9 @@ def get_medical_category(probability: float) -> dict:
     elif p <= 85: return {"label": "Acute Fatigue / Stress", "sub": "High", "band": "71–85%", "color": "#f97316", "bg": "rgba(249,115,22,0.08)", "bd": "rgba(249,115,22,0.22)"}
     else: return {"label": "Critical", "sub": "Consult Specialist", "band": "86–100%", "color": "#ef4444", "bg": "rgba(239,68,68,0.08)", "bd": "rgba(239,68,68,0.22)"}
 
-def compute_holistic_score(v_prob: float, dc_flag: float, p_prob: float | None, perclos: float) -> float:
-    """Fixed mathematical logic mapping directly to the V5 engine."""
-    # V5 ResNet is the primary driver. Dark circles act as a flat 5% fatigue penalty.
-    fatigue_penalty = dc_flag * 0.05
-    score = v_prob + fatigue_penalty
-    
-    # Optional physiological blending if in hybrid mode
-    if p_prob is not None:
-        score = (score * 0.70) + (p_prob * 0.30)
-        
-    # PERCLOS penalty (NHTSA standard)
-    if perclos >= PERCLOS_THRESHOLD: 
-        score += (perclos - PERCLOS_THRESHOLD) * 0.5
-        
+def compute_holistic_score(v_prob: float, dc_freq: float, p_prob: float | None, perclos: float) -> float:
+    score = (0.65 * v_prob + 0.10 * dc_freq + 0.25 * p_prob) / 1.0 if p_prob is not None else (0.65 * v_prob + 0.10 * dc_freq) / 0.75
+    if perclos >= PERCLOS_THRESHOLD: score = min(1.0, score + (perclos - PERCLOS_THRESHOLD) * 0.5)
     return float(np.clip(score, 0.0, 1.0))
 
 def process_frame(frame_bgr: np.ndarray) -> dict:
@@ -237,12 +209,10 @@ def process_frame(frame_bgr: np.ndarray) -> dict:
     h, w, _ = frame_bgr.shape
 
     feats = compute_v5_features(lm, blendshapes, h, w)
-    dc_flag = check_dark_circles_lab(frame_bgr, lm, w, h)
     v_prob = run_vision_model(feats["v5_vector"])
-    
-    # Calculate real-time holistic without physiological data
-    holistic = compute_holistic_score(v_prob, dc_flag, None, 0.0)
+    holistic = compute_holistic_score(v_prob, 0.0, None, 0.0)
 
+    # Extract raw coordinates for frontend canvas overlay
     mesh = {
         "l_eye": [{"x": lm[i].x, "y": lm[i].y} for i in LEFT_EYE],
         "r_eye": [{"x": lm[i].x, "y": lm[i].y} for i in RIGHT_EYE],
@@ -254,7 +224,6 @@ def process_frame(frame_bgr: np.ndarray) -> dict:
     return {
         "face_detected": True,
         "ear": feats["ear"], "etr": feats["etr"], "mar": feats["mar"], "moe": feats["moe"], "far": feats["far"],
-        "dc_flag": dc_flag,
         "v_prob": round(v_prob, 4), "holistic": round(holistic, 4),
         "blendshapes": feats["blendshapes"],
         "category": get_medical_category(holistic),
@@ -275,14 +244,11 @@ def build_report(sid: str, session_meta: dict, sensor_data: dict | None = None) 
 
     avg = lambda key: round(float(np.mean([f[key] for f in frames if key in f])), 4)
     v_p = avg("v_prob")
-    dc_f = avg("dc_flag")
-    
     buf = list(s.get("perclos_buf", []))
     perc = round(float(sum(buf) / len(buf)) if buf else 0.0, 4)
 
     p_prob = run_physiology_model(sensor_data.get("gsr", 4.5), sensor_data.get("hrv", 0.5), sensor_data.get("hr", 80.0)) if sensor_data else None
-    
-    holistic = compute_holistic_score(v_p, dc_f, p_prob, perc)
+    holistic = compute_holistic_score(v_p, 0.0, p_prob, perc)
     duration = session_meta.get("duration_s", 0)
     bpm_rate = round((s.get("blinks", 0) / duration * 60) if duration > 0 else 0.0, 1)
 
@@ -302,7 +268,6 @@ def build_report(sid: str, session_meta: dict, sensor_data: dict | None = None) 
         "blink_rate_bpm": bpm_rate,
         "perclos_pct": round(perc * 100, 1),
         "avg_ear": avg("ear"), "avg_etr": avg("etr"), "avg_mar": avg("mar"), "avg_moe": avg("moe"), "avg_far": avg("far"),
-        "dark_circle_pct": round(dc_f * 100, 1),
         "vision_stress_pct": round(v_p * 100, 1),
         "phys_stress_pct": round(p_prob * 100, 1) if p_prob else None,
         "holistic_pct": round(holistic * 100, 1),
@@ -342,15 +307,11 @@ def analyze_live():
         metrics["perclos"] = round(perclos, 4)
         metrics["blinks"] = sess["blinks"]
 
-        # Compute accurate holistic real-time score
         if phys:
             p_prob = run_physiology_model(phys.get("gsr", 4.5), phys.get("hrv", 0.5), phys.get("hr", 80.0))
             metrics["p_prob"] = round(p_prob, 4)
-            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], metrics.get("dc_flag", 0.0), p_prob, perclos), 4)
-        else:
-            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], metrics.get("dc_flag", 0.0), None, perclos), 4)
-            
-        metrics["category"] = get_medical_category(metrics["holistic"])
+            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], 0.0, p_prob, perclos), 4)
+            metrics["category"] = get_medical_category(metrics["holistic"])
 
     return jsonify(metrics)
 
@@ -421,5 +382,4 @@ def export_csv():
     return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv", as_attachment=True, download_name=f"PPD1_Records.csv")
 
 if __name__ == "__main__":
-    load_models()
     app.run(debug=True, host="127.0.0.1", port=5000, threaded=True)
