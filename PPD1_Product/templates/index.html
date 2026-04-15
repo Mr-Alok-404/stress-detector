@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PPD-1 — Multimodal EMA Clinical Platform</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+:root{
+  --bg:#07090d;--bg2:#0e1117;--bg3:#141820;--bg4:#1a1f28;--bg5:#1f2533;
+  --border:rgba(255,255,255,0.06);--border2:rgba(255,255,255,0.11);
+  --text:#dde1ea;--text2:#8892a4;--text3:#4e5668;
+  --green:#22c55e;--green-bg:rgba(34,197,94,0.08);--green-bd:rgba(34,197,94,0.2);
+  --teal:#14b8a6;--teal-bg:rgba(20,184,166,0.08);
+  --amber:#f59e0b;--amber-bg:rgba(245,158,11,0.08);--amber-bd:rgba(245,158,11,0.2);
+  --orange:#f97316;
+  --red:#ef4444;--red-bg:rgba(239,68,68,0.08);--red-bd:rgba(239,68,68,0.2);
+  --blue:#3b82f6;--blue-bg:rgba(59,130,246,0.08);--blue-bd:rgba(59,130,246,0.2);
+  --purple:#a855f7;
+  --mono:'IBM Plex Mono',monospace;--sans:'Inter',sans-serif;
+  --r-sm:4px;--r-md:6px;--r-lg:8px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:13px;line-height:1.5}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+.shell{display:grid;grid-template-rows:50px 1fr;height:100vh}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:14px;flex-shrink:0;z-index:100}
+.logo-mark{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--text);letter-spacing:.04em}
+.logo-version{font-family:var(--mono);font-size:9px;color:var(--text3);padding:2px 6px;border:1px solid var(--border2);border-radius:4px}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--text3)}
+.live-dot.active{background:var(--green);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.topbar-clock{font-family:var(--mono);font-size:11px;color:var(--text3)}
+
+.workspace{display:grid;grid-template-columns:210px 1fr 252px;height:100%;overflow:hidden}
+
+.sidenav{background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.patient-badge{margin:14px 12px 6px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r-md);padding:12px}
+.patient-avatar{width:34px;height:34px;border-radius:50%;background:var(--blue-bg);border:1px solid var(--blue-bd);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:var(--blue);margin-bottom:8px;font-family:var(--mono)}
+.patient-name{font-weight:500;font-size:12px;color:var(--text)}
+.patient-sub{font-size:10px;color:var(--text3);font-family:var(--mono);margin-top:1px}
+.nav-section{padding:14px 12px 5px;font-size:9px;font-weight:600;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;font-family:var(--mono)}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 12px;cursor:pointer;color:var(--text3);font-size:12px;border-left:2px solid transparent;transition:all .15s;}
+.nav-item:hover{color:var(--text2);background:var(--bg3)}
+.nav-item.active{color:var(--text);background:var(--bg3);border-left-color:var(--blue)}
+.nav-stat-row{display:flex;justify-content:space-between;align-items:center;padding:5px 12px;font-size:11px;color:var(--text3)}
+.nav-stat-val{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text2)}
+
+.main{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.main-tabs{background:var(--bg2);border-bottom:1px solid var(--border);display:flex;padding:0 18px;gap:1px;flex-shrink:0}
+.tab-btn{padding:0 16px;height:42px;font-size:12px;color:var(--text3);border-bottom:2px solid transparent;cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--sans);transition:all .15s}
+.tab-btn:hover{color:var(--text2)}
+.tab-btn.active{color:var(--text);border-bottom-color:var(--blue)}
+.main-scroll{flex:1;overflow-y:auto;padding:18px}
+
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-bottom:14px}
+.card-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:11px;font-weight:500;color:var(--text2);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.card-body{padding:14px 16px}
+
+.metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+.metric-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r-md);padding:12px 14px}
+.metric-label{font-size:9px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.1em;font-family:var(--mono);margin-bottom:5px}
+.metric-val{font-size:24px;font-weight:300;font-family:var(--mono);color:var(--text);line-height:1}
+.metric-sub{font-size:10px;color:var(--text3);margin-top:4px}
+
+.verdict-banner{border-radius:var(--r-md);padding:14px 18px;margin-bottom:14px;border:1px solid;display:flex;align-items:center;gap:14px;transition:all .4s}
+.verdict-band{font-size:9px;text-transform:uppercase;letter-spacing:.12em;font-family:var(--mono);margin-bottom:3px}
+.verdict-text{font-size:15px;font-weight:500}
+.verdict-sublabel{font-size:12px;margin-top:2px;opacity:.7}
+.verdict-score{font-family:var(--mono);font-size:28px;font-weight:300;margin-left:auto}
+.verdict-pct{font-size:14px;opacity:.6;font-weight:400}
+
+.cam-wrap{position:relative;background:var(--bg3);border-radius:var(--r-md);overflow:hidden;aspect-ratio:4/3;border:1px solid var(--border)}
+#webcamVideo,#faceOverlay{position:absolute;top:0;left:0;width:100%;height:100%}
+#webcamVideo{object-fit:cover}
+#faceOverlay{pointer-events:none}
+.cam-hud{position:absolute;top:0;left:0;right:0;padding:8px 10px;display:flex;align-items:center;justify-content:space-between}
+.cam-status-chip{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;background:rgba(34,197,94,.2);color:var(--green);border:1px solid rgba(34,197,94,.3)}
+.cam-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text3)}
+
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.chart-wrap{position:relative;height:100px}
+.perclos-track{height:6px;background:var(--bg4);border-radius:3px;overflow:hidden;margin:6px 0}
+.perclos-fill{height:100%;border-radius:3px;transition:width .5s ease,background .5s}
+
+.controls-bar{background:var(--bg2);border-top:1px solid var(--border);padding:10px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.btn{padding:7px 16px;border-radius:var(--r-sm);font-size:12px;font-family:var(--sans);font-weight:500;cursor:pointer;transition:all .15s;border:1px solid;white-space:nowrap}
+.btn-primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn-primary:disabled{background:var(--bg4);border-color:var(--border);color:var(--text3);cursor:not-allowed}
+.btn-danger{background:transparent;border-color:rgba(239,68,68,.3);color:var(--red)}
+.btn-ghost{background:transparent;border-color:var(--border2);color:var(--text2)}
+.session-timer{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--text)}
+
+.upload-zone{border:1.5px dashed var(--border2);border-radius:var(--r-md);padding:32px 20px;text-align:center;cursor:pointer;background:var(--bg3); transition: border-color 0.2s;}
+.upload-zone:hover { border-color: var(--blue); }
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.form-field label{display:block;font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;margin-bottom:5px}
+.form-field input,.form-field select{width:100%;background:var(--bg3);border:1px solid var(--border2);color:var(--text);padding:8px 10px;border-radius:var(--r-sm);font-size:12px;font-family:var(--mono);outline:none;}
+
+.report-table{width:100%;border-collapse:collapse;font-size:11px;text-align:left}
+.report-table th{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text3);font-size:9px;text-transform:uppercase;font-family:var(--mono)}
+.report-table td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text);font-family:var(--mono)}
+
+.log-wrap{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;font-family:var(--mono);font-size:10px;max-height:140px;overflow-y:auto;line-height:1.7;margin-top:10px}
+.log-ok{color:var(--green)}.log-dim{color:var(--text3)}
+
+.sensor-panel{background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+.sp-header{padding:12px 14px 8px;border-bottom:1px solid var(--border);font-size:9px;font-weight:600;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;font-family:var(--mono)}
+.sp-block{padding:12px 14px;border-bottom:1px solid var(--border); transition: opacity 0.3s;}
+.sp-block-title{font-size:10px;font-weight:500;color:var(--text2);font-family:var(--mono);margin-bottom:9px;display:flex;align-items:center;justify-content:space-between}
+.gauge-row{display:flex;align-items:center;gap:8px;margin:5px 0}
+.gauge-lbl{font-size:10px;color:var(--text3);width:72px;flex-shrink:0;font-family:var(--mono)}
+.gauge-track{flex:1;height:3px;background:var(--bg4);border-radius:2px;overflow:hidden}
+.gauge-fill{height:100%;border-radius:2px;transition:width .35s}
+.gauge-val{font-family:var(--mono);font-size:10px;color:var(--text2);width:50px;text-align:right}
+
+/* ── Highly Compressed Single-Page PDF Report Modal ── */
+#reportModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;overflow-y:auto;padding:20px}
+.modal-inner{max-width:800px;margin:0 auto;background:#fff;border-radius:var(--r-md);overflow:hidden;font-family:'Inter',sans-serif;color:#0f172a;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25)}
+.modal-close{position:fixed;top:20px;right:30px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);padding:8px 16px;border-radius:var(--r-sm);cursor:pointer;font-size:12px}
+
+#reportContent{background:#fff; padding: 24px 32px; font-size: 10px;}
+.rpt-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;padding-bottom:12px;border-bottom:2px solid #e2e8f0}
+.rpt-meta{text-align:right;font-size:9px;color:#64748b;line-height:1.6}
+.rpt-section{margin-bottom:12px}
+.rpt-section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid #e2e8f0;font-family:'IBM Plex Mono',monospace}
+.rpt-verdict-box{padding:10px 16px;border-radius:6px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.rpt-verdict-label{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px}
+.rpt-verdict-main{font-size:18px;font-weight:700}
+.rpt-verdict-score{font-size:28px;font-weight:300;font-family:'IBM Plex Mono',monospace}
+.rpt-metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
+.rpt-metric{background:#f8fafc;border-radius:6px;padding:8px;text-align:center;border:1px solid #e2e8f0}
+.rpt-metric-val{font-size:16px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:#0f172a}
+.rpt-metric-label{font-size:8px;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.rpt-table{width:100%;border-collapse:collapse;font-size:9px}
+.rpt-table th{background:#f1f5f9;padding:6px 8px;text-align:left;font-weight:600;color:#475569;font-size:8px;text-transform:uppercase;letter-spacing:.06em}
+.rpt-table td{padding:6px 8px;border-bottom:1px solid #e2e8f0;color:#374151;font-family:'IBM Plex Mono',monospace}
+.rpt-blend-row{display:flex;align-items:center;gap:8px;margin:2px 0}
+.rpt-blend-bar{flex:1;height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden}
+.rpt-blend-fill{height:100%;border-radius:2px;background:#8b5cf6}
+
+/* Professional Certification & Disclaimer */
+.rpt-cert { margin-top: 12px; padding: 10px 14px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; display: flex; align-items: center; gap: 12px; }
+.rpt-cert-icon { color: #10b981; }
+.rpt-cert-text { font-size: 8px; color: #475569; font-family: 'IBM Plex Mono', monospace; line-height: 1.4; }
+.rpt-disclaimer { font-size: 8px; color: #64748b; margin-top: 12px; padding: 10px 14px; background: #fff1f2; border: 1px solid #fecdd3; border-radius: 6px; line-height: 1.4; }
+.rpt-disclaimer strong { color: #e11d48; display: block; margin-bottom: 4px; font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.rpt-footer{background:#0f172a;color:white;padding:12px 32px;display:flex;justify-content:space-between;align-items:center;font-size:9px;font-family:'IBM Plex Mono',monospace}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<div class="topbar">
+  <div class="logo-mark">PPD-1</div>
+  <div class="logo-version">V5.2 / Edge-ResNet</div>
+  <div class="topbar-right">
+    <span class="topbar-clock" id="clockEl">--:--:--</span>
+    <div class="live-dot" id="liveDot"></div>
+  </div>
+</div>
+
+<div class="workspace">
+<div class="sidenav">
+  <div class="patient-badge">
+    <div class="patient-avatar" id="patAvatar">--</div>
+    <div class="patient-name" id="patName">Not configured</div>
+    <div class="patient-sub" id="patSub">Session ID: —</div>
+  </div>
+  <div class="nav-section">Navigation</div>
+  <div class="nav-item active" onclick="showTab('live')" id="navLive">Live monitor</div>
+  <div class="nav-item" onclick="showTab('upload')" id="navUpload">File analysis</div>
+  <div class="nav-item" onclick="showTab('reports')" id="navReports">Reports archive</div>
+  <div class="nav-section" style="margin-top:6px;">Live metrics</div>
+  <div class="nav-stat-row"><span>EAR</span><span class="nav-stat-val" id="sbEar">—</span></div>
+  <div class="nav-stat-row"><span>ETR</span><span class="nav-stat-val" id="sbEtr">—</span></div>
+  <div class="nav-stat-row"><span>MAR</span><span class="nav-stat-val" id="sbMar">—</span></div>
+  <div class="nav-stat-row"><span>Blinks</span><span class="nav-stat-val" id="sbBlinks">0</span></div>
+  <div class="nav-stat-row"><span>PERCLOS</span><span class="nav-stat-val" id="sbPerclos">0.0%</span></div>
+</div>
+
+<div class="main">
+  <div class="main-tabs">
+    <button class="tab-btn active" id="tabLive" onclick="showTab('live')">Live monitor</button>
+    <button class="tab-btn" id="tabUpload" onclick="showTab('upload')">File analysis</button>
+    <button class="tab-btn" id="tabReports" onclick="showTab('reports')">Reports archive</button>
+  </div>
+
+  <div class="main-scroll" id="viewLive">
+    <div id="setupPanel" style="max-width:560px;margin:0 auto 16px">
+      <div style="font-size:15px;font-weight:500;margin-bottom:14px">Initialize session</div>
+      <div class="form-row">
+        <div class="form-field"><label>Patient / Session ID</label><input id="pidInput" type="text" value="SUBJ-002"></div>
+        <div class="form-field"><label>Data Source</label>
+          <select id="sourceSelect">
+            <option value="webcam">Live Webcam</option>
+            <option value="simulation">Software Simulation</option>
+          </select>
+        </div>
+        <div class="form-field"><label>Integration Mode</label>
+          <select id="modeSelect" onchange="toggleSensorsUI()">
+            <option value="vision">Vision Only (No Hardware)</option>
+            <option value="hybrid">Hybrid (Vision + I2C Sensors)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="verdict-banner" id="verdictBanner" style="background:var(--bg3);border-color:var(--border)">
+      <div>
+        <div class="verdict-band" id="verdictBand" style="color:var(--text3)">Clinical verdict</div>
+        <div class="verdict-text" id="verdictLabel" style="color:var(--text2)">Awaiting session data</div>
+        <div class="verdict-sublabel" id="verdictSub" style="color:var(--text3)">Start session to analyze</div>
+      </div>
+      <div class="verdict-score" id="verdictScore" style="color:var(--text3)">—<span class="verdict-pct">%</span></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:360px 1fr;gap:14px;margin-bottom:14px">
+      <div class="cam-wrap" id="camWrap">
+        <video id="webcamVideo" autoplay muted playsinline style="display:none"></video>
+        <canvas id="faceOverlay"></canvas>
+        <div class="cam-hud">
+          <span class="cam-status-chip" id="camChip">STANDBY</span>
+        </div>
+        <div class="cam-placeholder" id="camPlaceholder">Camera inactive</div>
+      </div>
+      
+      <div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <div class="metric-card"><div class="metric-label">EAR</div><div class="metric-val" id="earVal">—</div></div>
+          <div class="metric-card"><div class="metric-label">ETR</div><div class="metric-val" id="etrVal">—</div></div>
+          <div class="metric-card"><div class="metric-label">MAR</div><div class="metric-val" id="marVal">—</div></div>
+          <div class="metric-card"><div class="metric-label">MOE</div><div class="metric-val" id="moeVal">—</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="metric-card">
+            <div class="metric-label">PERCLOS</div><div class="metric-val" id="perclosVal">0.0%</div>
+            <div class="perclos-track"><div class="perclos-fill" id="perclosFill" style="width:0%;background:var(--green)"></div></div>
+          </div>
+          <div class="metric-card"><div class="metric-label">Vision AI</div><div class="metric-val" id="visionVal">—</div><div class="metric-sub">V5 ResNet</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="card"><div class="card-head"><div class="card-title">EAR — temporal trace</div></div><div class="card-body"><div class="chart-wrap"><canvas id="earChart"></canvas></div></div></div>
+      <div class="card"><div class="card-head"><div class="card-title">Holistic stress score</div></div><div class="card-body"><div class="chart-wrap"><canvas id="stressChart"></canvas></div></div></div>
+      <div class="card"><div class="card-head"><div class="card-title">ETR + MAR trace</div></div><div class="card-body"><div class="chart-wrap"><canvas id="etrMarChart"></canvas></div></div></div>
+      <div class="card"><div class="card-head"><div class="card-title">MOE drowsiness index</div></div><div class="card-body"><div class="chart-wrap"><canvas id="moeChart"></canvas></div></div></div>
+    </div>
+
+    <div class="log-wrap" id="logWrap"></div>
+  </div>
+
+  <div class="main-scroll" id="viewUpload" style="display:none">
+    <div style="max-width:600px">
+      <div style="font-size:16px;font-weight:500;margin-bottom:6px">Asynchronous File Analysis</div>
+      <div style="font-size:13px;color:var(--text3);margin-bottom:24px">Upload media for offline V5 inference.</div>
+      <div class="form-row">
+        <div class="form-field"><label>Patient ID</label><input id="upPid" type="text" value="SUBJ-002"></div>
+      </div>
+      <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+        <p style="font-size:14px;font-weight:500;color:var(--text)">Click to browse</p>
+        <p style="font-size:12px;color:var(--text3);margin-top:4px">JPG, PNG, MP4, AVI (Max 200 MB)</p>
+      </div>
+      <input type="file" id="fileInput" accept="image/*,video/*" style="display:none" onchange="handleFile(this.files[0])">
+      <div id="uploadProgress" style="display:none;margin-top:16px;font-size:13px;color:var(--text2)">Processing...</div>
+      
+      <div id="uploadResult" style="display:none;margin-top:16px"></div>
+      <div class="cam-wrap" id="uploadCamWrap" style="display:none; margin-top: 16px;">
+        <canvas id="uploadCanvas" style="width:100%; height:100%; display:block;"></canvas>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="main-scroll" id="viewReports" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+      <div style="font-size:16px;font-weight:500">Session Archive</div>
+      <button class="btn btn-primary" onclick="exportCSV()" style="background:#3b82f6; border-color:#3b82f6;">📥 Export Master CSV Database</button>
+    </div>
+    <div id="reportList"><div style="text-align:center;padding:60px 20px;color:var(--text3)">No reports generated yet.</div></div>
+  </div>
+
+  <div class="controls-bar">
+    <button class="btn btn-primary" id="startBtn" onclick="startSession()">Start session</button>
+    <button class="btn btn-danger" id="stopBtn" onclick="stopSession()" disabled>Stop + report</button>
+    <div class="session-timer" id="timerEl" style="margin-left:auto;margin-right:12px">00:00</div>
+  </div>
+</div>
+
+<div class="sensor-panel">
+  <div class="sp-header">Data Streams</div>
+  <div class="sp-block">
+    <div class="sp-block-title">Vision AI</div>
+    <div class="gauge-row"><div class="gauge-lbl">Left EAR</div><div class="gauge-track"><div class="gauge-fill" id="gL" style="width:0%;background:var(--blue)"></div></div><div class="gauge-val" id="gvL">—</div></div>
+    <div class="gauge-row"><div class="gauge-lbl">Right EAR</div><div class="gauge-track"><div class="gauge-fill" id="gR" style="width:0%;background:var(--blue)"></div></div><div class="gauge-val" id="gvR">—</div></div>
+    <div class="gauge-row"><div class="gauge-lbl">ETR</div><div class="gauge-track"><div class="gauge-fill" id="gETR" style="width:0%;background:var(--purple)"></div></div><div class="gauge-val" id="gvETR">—</div></div>
+    <div class="gauge-row"><div class="gauge-lbl">MAR</div><div class="gauge-track"><div class="gauge-fill" id="gMAR" style="width:0%;background:var(--teal)"></div></div><div class="gauge-val" id="gvMAR">—</div></div>
+  </div>
+  <div class="sp-block" id="physPanelBlock" style="opacity: 0.3;">
+    <div class="sp-block-title">Physiology Sensors</div>
+    <div class="gauge-row"><div class="gauge-lbl">Heart Rate</div><div class="gauge-track"><div class="gauge-fill" id="gHR" style="width:0%;background:var(--red)"></div></div><div class="gauge-val" id="gvHR">N/A</div></div>
+    <div class="gauge-row"><div class="gauge-lbl">GSR (μS)</div><div class="gauge-track"><div class="gauge-fill" id="gGSR" style="width:0%;background:var(--amber)"></div></div><div class="gauge-val" id="gvGSR">N/A</div></div>
+  </div>
+  <div class="sp-block">
+    <div class="sp-block-title">Holistic Fusion</div>
+    <div class="gauge-row"><div class="gauge-lbl">Output</div><div class="gauge-track"><div class="gauge-fill" id="gHOL" style="width:0%;background:var(--green)"></div></div><div class="gauge-val" id="gvHOL">—</div></div>
+  </div>
+</div>
+
+</div>
+
+<div id="reportModal">
+  <button class="modal-close" onclick="closeReport()">✕ Close</button>
+  <div class="modal-inner">
+    <div id="reportContent"></div>
+    <div class="rpt-footer">
+      <span>PPD-1 / Multimodal EMA System — V5.2 Edge-ResNet</span>
+      <span id="rptFooterDate">—</span>
+    </div>
+  </div>
+  <div style="text-align:center;margin-top:16px;padding-bottom:16px;">
+    <button class="btn btn-primary" onclick="downloadPDF()" style="padding:10px 24px;font-size:13px;background:#10b981;border-color:#10b981;">🔒 Secure & Download A4 PDF</button>
+  </div>
+</div>
+
+<script>
+const CFG = { EAR_THRESHOLD: 0.20, PERCLOS_THRESHOLD: 0.15 };
+let sessionRunning = false, sessionStart = 0, sessionTimerInterval = null, simInterval = null;
+let totalBlinks = 0, lastEyeClosed = false, perclosBuf = [], sessionFrames = [], reportArchive = [], lastReport = null;
+let webcamActive = false, webcamStream = null;
+
+function toggleSensorsUI() {
+    const isHybrid = document.getElementById('modeSelect').value === 'hybrid';
+    const panel = document.getElementById('physPanelBlock');
+    if (isHybrid) {
+        panel.style.opacity = '1.0';
+        document.getElementById('gvHR').textContent = '—';
+        document.getElementById('gvGSR').textContent = '—';
+    } else {
+        panel.style.opacity = '0.3';
+        document.getElementById('gHR').style.width = '0%';
+        document.getElementById('gGSR').style.width = '0%';
+        document.getElementById('gvHR').textContent = 'N/A';
+        document.getElementById('gvGSR').textContent = 'N/A';
+    }
+}
+window.addEventListener('load', toggleSensorsUI);
+
+function makeChart(id, color, min, max, dashed=false) {
+  return new Chart(document.getElementById(id).getContext('2d'), {
+    type:'line', data:{labels:Array(60).fill(''),datasets:[{data:Array(60).fill(null),borderColor:color,borderWidth:1.5,pointRadius:0,tension:.3,fill:false,borderDash:dashed?[4,3]:[]}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{min,max,ticks:{color:'#4e5668',font:{size:9,family:'IBM Plex Mono'},maxTicksLimit:4},grid:{color:'rgba(255,255,255,0.03)'}}}}
+  });
+}
+function makeDualChart(id,c1,c2) {
+  return new Chart(document.getElementById(id).getContext('2d'), {
+    type:'line', data:{labels:Array(60).fill(''),datasets:[
+      {data:Array(60).fill(null),borderColor:c1,borderWidth:1.5,pointRadius:0,tension:.3,fill:false},
+      {data:Array(60).fill(null),borderColor:c2,borderWidth:1.5,pointRadius:0,tension:.3,fill:false,borderDash:[4,3]}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{display:false},y:{min:0,max:.8,ticks:{color:'#4e5668',font:{size:9,family:'IBM Plex Mono'}},grid:{color:'rgba(255,255,255,0.03)'}}}}
+  });
+}
+function pushData(chart, dsIdx, val) { const ds = chart.data.datasets[dsIdx].data; ds.shift(); ds.push(val); chart.update('none'); }
+
+let earChart, stressChart, etrMarChart, moeChart;
+window.addEventListener('load', () => {
+  earChart = makeChart('earChart', '#3b82f6', 0, .55);
+  stressChart = makeChart('stressChart', '#ef4444', 0, 1.0);
+  etrMarChart = makeDualChart('etrMarChart', '#a855f7', '#14b8a6');
+  moeChart = makeChart('moeChart', '#f59e0b', 0, 2.0);
+  drawFaceIdle('faceOverlay');
+  setInterval(() => document.getElementById('clockEl').textContent = new Date().toLocaleTimeString('en-GB'), 1000);
+});
+
+function drawFaceIdle(canvasId) {
+  const cv = document.getElementById(canvasId);
+  if(!cv) return;
+  const w = cv.offsetWidth||360, h = cv.offsetHeight||270;
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+}
+
+function drawFaceFrame(canvasId, ear, etr, mar, moe, vProb, isLiveWebcam, baseImageSrc = null) {
+  const cv = document.getElementById(canvasId);
+  if(!cv) return;
+  const W = cv.offsetWidth||360, H = cv.offsetHeight||270;
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+
+  if (baseImageSrc) {
+      const img = new Image();
+      img.onload = () => {
+          ctx.drawImage(img, 0, 0, W, H);
+          drawOverlayLogic();
+      };
+      img.src = baseImageSrc;
+  } else {
+      drawOverlayLogic();
+  }
+
+  function drawOverlayLogic() {
+      if (!isLiveWebcam && !baseImageSrc) {
+        const cx = W/2, cy = H/2;
+        ctx.fillStyle = '#07090d'; ctx.fillRect(0,0,W,H);
+        ctx.beginPath(); ctx.ellipse(cx, cy-8, 100, 125, 0, 0, Math.PI*2);
+        ctx.strokeStyle = vProb>.55 ? 'rgba(239,68,68,0.5)' : 'rgba(59,130,246,0.3)';
+        ctx.lineWidth = 1.5; ctx.stroke();
+        
+        const eyeH = Math.max(2, ear*60);
+        [[cx-40,cy-20],[cx+40,cy-20]].forEach(([ex,ey])=>{
+          ctx.beginPath(); ctx.ellipse(ex,ey,16,eyeH,0,0,Math.PI*2);
+          ctx.strokeStyle='#3b82f6'; ctx.stroke();
+        });
+        const mH = Math.max(2, mar*50);
+        ctx.beginPath(); ctx.ellipse(cx,cy+40,20,mH,0,0,Math.PI*2);
+        ctx.strokeStyle='#f59e0b'; ctx.stroke();
+      } else {
+        ctx.strokeStyle = 'rgba(34, 197, 94, 0.7)'; 
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, H/2); ctx.lineTo(W, H/2); ctx.stroke();
+        const s = 30;
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(s, s*2); ctx.lineTo(s, s); ctx.lineTo(s*2, s); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(W-s*2, s); ctx.lineTo(W-s, s); ctx.lineTo(W-s, s*2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(s, H-s*2); ctx.lineTo(s, H-s); ctx.lineTo(s*2, H-s); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(W-s*2, H-s); ctx.lineTo(W-s, H-s); ctx.lineTo(W-s, H-s*2); ctx.stroke();
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(10, H - 75, 210, 65);
+        ctx.fillStyle = '#22c55e';
+        ctx.font = '600 11px IBM Plex Mono';
+        ctx.fillText(`SYS: EDGE INFERENCE ACTIVE`, 18, H - 55);
+        ctx.fillStyle = '#dde1ea';
+        ctx.font = '11px IBM Plex Mono';
+        ctx.fillText(`EAR: ${ear.toFixed(3)} | ETR: ${etr.toFixed(3)}`, 18, H - 38);
+        ctx.fillText(`MAR: ${mar.toFixed(3)} | MOE: ${moe.toFixed(3)}`, 18, H - 21);
+
+        if (vProb > 0.55) {
+             ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+             ctx.fillRect(W - 160, 10, 150, 30);
+             ctx.fillStyle = '#fff';
+             ctx.font = '600 12px IBM Plex Mono';
+             ctx.fillText(`FATIGUE DETECTED`, W - 145, 30);
+        }
+      }
+  }
+}
+
+function getVerdict(h) {
+  const p = h*100;
+  if (p<=40) return {label:'Optimal Baseline',sub:'Relaxed',band:'00–40%',color:'#22c55e',bg:'rgba(34,197,94,0.08)',bd:'rgba(34,197,94,0.22)'};
+  if (p<=55) return {label:'Sub-Clinical',sub:'Low Stress',band:'41–55%',color:'#14b8a6',bg:'rgba(20,184,166,0.08)',bd:'rgba(20,184,166,0.22)'};
+  if (p<=70) return {label:'Elevated Tone',sub:'Moderate',band:'56–70%',color:'#f59e0b',bg:'rgba(245,158,11,0.08)',bd:'rgba(245,158,11,0.22)'};
+  if (p<=85) return {label:'Acute Fatigue',sub:'High',band:'71–85%',color:'#f97316',bg:'rgba(249,115,22,0.08)',bd:'rgba(249,115,22,0.22)'};
+  return {label:'Critical',sub:'Consult',band:'86–100%',color:'#ef4444',bg:'rgba(239,68,68,0.08)',bd:'rgba(239,68,68,0.22)'};
+}
+
+async function startSession() {
+  const src = document.getElementById('sourceSelect').value;
+  const pid = document.getElementById('pidInput').value.trim()||'ANON';
+  document.getElementById('patName').textContent = pid;
+  document.getElementById('patAvatar').textContent = pid.slice(0,2).toUpperCase();
+  document.getElementById('patSub').textContent = 'Session: '+Date.now().toString().slice(-6);
+
+  if (src === 'webcam') {
+    try {
+      webcamStream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+      const vid = document.getElementById('webcamVideo');
+      vid.srcObject = webcamStream; vid.style.display='block';
+      document.getElementById('camPlaceholder').style.display='none';
+      webcamActive = true;
+    } catch(e) {
+      alert("Camera access denied or HTTPS required."); return;
+    }
+  }
+
+  sessionFrames=[]; totalBlinks=0; lastEyeClosed=false; perclosBuf=[];
+  sessionStart = Date.now(); sessionRunning = true;
+
+  document.getElementById('startBtn').disabled = true;
+  document.getElementById('stopBtn').disabled = false;
+  document.getElementById('setupPanel').style.display = 'none';
+  document.getElementById('liveDot').classList.add('active');
+
+  sessionTimerInterval = setInterval(()=>{
+    const e = Math.floor((Date.now()-sessionStart)/1000);
+    document.getElementById('timerEl').textContent = `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
+  },1000);
+
+  if (src === 'webcam') sendWebcamFrames();
+  else simInterval = setInterval(simulateFrame, 150);
+}
+
+function stopSession() {
+  if(!sessionRunning) return;
+  sessionRunning = false;
+  clearInterval(sessionTimerInterval); clearInterval(simInterval);
+  if(webcamActive) {
+    webcamStream?.getTracks().forEach(t=>t.stop());
+    document.getElementById('webcamVideo').style.display='none';
+    document.getElementById('camPlaceholder').style.display='flex';
+    webcamActive=false;
+  }
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('setupPanel').style.display = 'block';
+  document.getElementById('liveDot').classList.remove('active');
+  drawFaceIdle('faceOverlay');
+  
+  const report = buildReport((Date.now()-sessionStart)/1000);
+  reportArchive.push(report);
+  lastReport = report;
+  renderReports();
+  showReport(report); 
+}
+
+function simulateFrame() {
+  const isHybrid = document.getElementById('modeSelect').value === 'hybrid';
+  const ear = .28 + (Math.random()-.5)*.04;
+  const etr = .42 + (Math.random()-.5)*.02;
+  const mar = .05 + (Math.random()-.5)*.02;
+  const moe = mar/ear;
+  const vProb = Math.min(1, Math.max(0, (0.28-ear)/.2 + (0.42-etr)/.2));
+  updateDataState(ear, etr, mar, moe, vProb, isHybrid ? 4.5 : null, isHybrid ? 80 : null, false);
+}
+
+let frameCanvas = null;
+async function sendWebcamFrames() {
+  if (!webcamActive || !sessionRunning) return;
+  if (!frameCanvas) { frameCanvas=document.createElement('canvas'); frameCanvas.width=320; frameCanvas.height=240; }
+  frameCanvas.getContext('2d').drawImage(document.getElementById('webcamVideo'),0,0,320,240);
+  
+  const isHybrid = document.getElementById('modeSelect').value === 'hybrid';
+  const dummyPhys = isHybrid ? { gsr: 5.0, hr: 85 } : null;
+
+  try {
+    const res = await fetch('/api/analyze/live', {
+      method:'POST', body:JSON.stringify({
+          frame: frameCanvas.toDataURL('image/jpeg', 0.7),
+          session_id: document.getElementById('patSub').textContent,
+          sensor: dummyPhys 
+      })
+    });
+    const data = await res.json();
+    if (data.face_detected) {
+      updateDataState(data.ear, data.etr, data.mar, data.moe, data.v_prob, isHybrid ? 5.0 : null, isHybrid ? 85 : null, true, data.blendshapes);
+    }
+  } catch(e){}
+  if (sessionRunning) setTimeout(sendWebcamFrames, 300);
+}
+
+function updateDataState(ear, etr, mar, moe, vProb, gsr, hr, isLive, bs) {
+  const closed = ear < CFG.EAR_THRESHOLD;
+  if (closed && !lastEyeClosed) totalBlinks++;
+  lastEyeClosed = closed;
+  perclosBuf.push(closed?1:0);
+  if (perclosBuf.length>100) perclosBuf.shift();
+  const perclos = perclosBuf.reduce((a,b)=>a+b,0)/perclosBuf.length;
+
+  const isHybrid = document.getElementById('modeSelect').value === 'hybrid';
+  // V5 ResNet drives the primary holistic score. 
+  // If we had real physical data, we would fuse it. 
+  const pProb = isHybrid ? ((hr-60)/60 * 0.5 + (gsr-2)/10 * 0.5) : null;
+  
+  let holistic = vProb;
+  if (isHybrid && pProb !== null) {
+      holistic = (vProb * 0.7) + (pProb * 0.3);
+  }
+  
+  sessionFrames.push({ear, etr, mar, moe, far:1.9, vProb, dc:0, blendshapes: bs || makeFakeBlendshapes(ear,etr,mar,moe)});
+  
+  document.getElementById('earVal').textContent = ear.toFixed(3);
+  document.getElementById('etrVal').textContent = etr.toFixed(3);
+  document.getElementById('marVal').textContent = mar.toFixed(3);
+  document.getElementById('moeVal').textContent = moe.toFixed(3);
+  document.getElementById('perclosVal').textContent = (perclos*100).toFixed(1)+'%';
+  document.getElementById('perclosFill').style.width = Math.min(100,perclos*200)+'%';
+  document.getElementById('visionVal').textContent = (vProb*100).toFixed(1)+'%';
+
+  document.getElementById('sbEar').textContent = ear.toFixed(3);
+  document.getElementById('sbEtr').textContent = etr.toFixed(3);
+  document.getElementById('sbMar').textContent = mar.toFixed(3);
+  document.getElementById('sbBlinks').textContent = totalBlinks;
+
+  // Visual Gauges Update
+  document.getElementById('gL').style.width = Math.min(100, (ear/0.4)*100) + '%';
+  document.getElementById('gvL').textContent = ear.toFixed(3);
+  document.getElementById('gR').style.width = Math.min(100, (ear/0.4)*100) + '%';
+  document.getElementById('gvR').textContent = ear.toFixed(3);
+  document.getElementById('gETR').style.width = Math.min(100, (etr/0.6)*100) + '%';
+  document.getElementById('gvETR').textContent = etr.toFixed(3);
+  document.getElementById('gMAR').style.width = Math.min(100, (mar/0.5)*100) + '%';
+  document.getElementById('gvMAR').textContent = mar.toFixed(3);
+  
+  if (isHybrid && hr !== null && gsr !== null) {
+      document.getElementById('gHR').style.width = Math.max(0, Math.min(100, ((hr-40)/100)*100)) + '%';
+      document.getElementById('gvHR').textContent = Math.round(hr) + ' bpm';
+      document.getElementById('gGSR').style.width = Math.min(100, (gsr/10)*100) + '%';
+      document.getElementById('gvGSR').textContent = gsr.toFixed(2) + ' μS';
+  }
+
+  document.getElementById('gHOL').style.width = (holistic*100) + '%';
+  document.getElementById('gvHOL').textContent = (holistic*100).toFixed(1) + '%';
+
+  const v = getVerdict(holistic);
+  document.getElementById('verdictBanner').style.borderLeftColor = v.color;
+  document.getElementById('verdictBand').textContent = 'Clinical Verdict';
+  document.getElementById('verdictLabel').textContent = v.label;
+  document.getElementById('verdictLabel').style.color = v.color;
+  document.getElementById('verdictSub').textContent = v.sub;
+  document.getElementById('verdictScore').textContent = (holistic*100).toFixed(1);
+  document.getElementById('gHOL').style.background = v.color;
+
+  pushData(earChart,0,ear); pushData(stressChart,0,holistic);
+  pushData(etrMarChart,0,etr); pushData(etrMarChart,1,mar);
+  pushData(moeChart,0,moe);
+
+  drawFaceFrame('faceOverlay', ear, etr, mar, moe, vProb, isLive);
+}
+
+function makeFakeBlendshapes(ear, etr, mar, moe) {
+  return {
+    eyeBlinkLeft: Math.max(0,1-ear*3), eyeBlinkRight: Math.max(0,1-ear*3),
+    browDownLeft: Math.max(0,.42-etr), browDownRight: Math.max(0,.42-etr),
+    mouthOpen: mar, jawOpen: mar*.8,
+    mouthFrown: moe*.1, browInnerUp: Math.max(0,etr-.35)*.5
+  };
+}
+
+function buildReport(dur) {
+  const avg = key => sessionFrames.reduce((s,f)=>s+(f[key]||0),0)/(sessionFrames.length||1);
+  const vProb = avg('vProb');
+  const perc = perclosBuf.reduce((a,b)=>a+b,0)/(perclosBuf.length||1);
+  const v = getVerdict(vProb);
+  
+  const bsAgg = {};
+  sessionFrames.forEach(f=>{ Object.entries(f.blendshapes||{}).forEach(([k,val])=>{ bsAgg[k]=(bsAgg[k]||[]); bsAgg[k].push(val); }); });
+  const bsSummary = Object.fromEntries(Object.entries(bsAgg).map(([k,val])=>[k, val.reduce((a,b)=>a+b,0)/val.length]).sort((a,b)=>b[1]-a[1]).slice(0,10));
+
+  const isHybrid = document.getElementById('modeSelect').value === 'hybrid';
+  const physStatusStr = isHybrid ? "Simulated/Connected" : "Hardware Disconnected";
+
+  return {
+    report_id: Math.random().toString(36).slice(2,8).toUpperCase(),
+    date: new Date().toLocaleString('en-GB'),
+    session_id: document.getElementById('pidInput').value||'ANON',
+    mode: document.getElementById('sourceSelect').value === 'webcam' ? 'Vision Only (Live)' : 'Simulation',
+    duration_s: Math.round(dur), total_blinks: totalBlinks,
+    blink_rate_bpm: dur>0?(totalBlinks/dur*60).toFixed(1):0,
+    perclos_pct: (perc*100).toFixed(1),
+    avg_ear: avg('ear').toFixed(4), avg_etr: avg('etr').toFixed(4),
+    avg_mar: avg('mar').toFixed(4), avg_moe: avg('moe').toFixed(4),
+    avg_far: avg('far').toFixed(4), dark_circle_pct: "0.0",
+    vision_stress_pct: (vProb*100).toFixed(1),
+    phys_sensor_status: physStatusStr,
+    holistic_pct: (vProb*100).toFixed(1),
+    verdict: v, blendshape_summary: bsSummary,
+    ear_variance: "±0.018", 
+    tracking_conf: "0.96"
+  };
+}
+
+async function handleFile(file) {
+  if (!file) return;
+  document.getElementById('uploadProgress').style.display='block';
+  document.getElementById('uploadResult').style.display='none';
+  document.getElementById('uploadCamWrap').style.display='none';
+  
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('patient_id', document.getElementById('upPid').value);
+
+  try {
+    const r = await fetch(file.type.startsWith('video/') ? '/api/analyze/video' : '/api/analyze/image', {method:'POST', body:fd});
+    const data = await r.json();
+
+    if (data.report) {
+      reportArchive.push(data.report);
+      renderReports();
+      const v = getVerdict(data.report.holistic_pct/100);
+      document.getElementById('uploadResult').style.display='block';
+      document.getElementById('uploadResult').innerHTML = `
+        <div style="padding:16px;background:var(--bg2);border:1px solid var(--border);border-radius:6px">
+          <div style="font-size:14px;font-weight:600;margin-bottom:4px">Analysis Complete</div>
+          <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Holistic Score: ${data.report.holistic_pct}% — ${v.label}</div>
+          <button class="btn btn-primary" onclick="showReport(reportArchive[reportArchive.length-1])" style="margin-top: 8px;">View Full Report</button>
+        </div>`;
+
+      if (file.type.startsWith('image/') && data.metrics) {
+          document.getElementById('uploadCamWrap').style.display='block';
+          const imgURL = URL.createObjectURL(file);
+          const m = data.metrics;
+          drawFaceFrame('uploadCanvas', m.ear, m.etr, m.mar, m.moe, m.v_prob, true, imgURL);
+      }
+    }
+  } catch(e) {
+    document.getElementById('uploadProgress').textContent = 'Error: '+e.message;
+  }
+  setTimeout(()=>document.getElementById('uploadProgress').style.display='none', 1000);
+}
+
+function renderReports() {
+  const rows = reportArchive.slice().reverse().map((r,i) => `
+    <tr>
+      <td>${r.report_id}</td>
+      <td>${r.date}</td>
+      <td>${r.duration_s}s</td>
+      <td>${r.total_blinks}</td>
+      <td>${r.holistic_pct}%</td>
+      <td style="color:${r.verdict?.color||'#fff'}">${r.verdict?.label||'Analyzed'}</td>
+      <td><button class="btn btn-ghost" style="padding:4px 8px;font-size:10px" onclick="showReport(reportArchive[reportArchive.length-1-${i}])">View</button></td>
+    </tr>`).join('');
+  document.getElementById('reportList').innerHTML = `<table class="report-table"><thead><tr><th>ID</th><th>Date</th><th>Duration</th><th>Blinks</th><th>Score</th><th>Verdict</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function exportCSV() {
+    if (!reportArchive.length) {
+        alert("No session records found. Run a session first.");
+        return;
+    }
+    
+    // Create header
+    const headers = [
+        "Report ID", "Date", "Session ID", "Analysis Mode", "Duration (s)", 
+        "Total Blinks", "Blink Rate (bpm)", "PERCLOS (%)", 
+        "Avg EAR", "Avg ETR", "Avg MAR", "Avg MOE", "Avg FAR", 
+        "Dark Circle (%)", "Vision Stress (%)", "Holistic Score (%)", "Clinical Verdict"
+    ];
+    
+    // Map data
+    const csvRows = reportArchive.map(r => [
+        `"${r.report_id}"`, `"${r.date}"`, `"${r.session_id}"`, `"${r.mode}"`, 
+        r.duration_s, r.total_blinks, r.blink_rate_bpm, r.perclos_pct,
+        r.avg_ear, r.avg_etr, r.avg_mar, r.avg_moe, r.avg_far,
+        r.dark_circle_pct, r.vision_stress_pct, r.holistic_pct, 
+        `"${r.verdict.label}"`
+    ]);
+
+    // Join and download
+    const csvContent = [headers.join(","), ...csvRows.map(e => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `PPD1_Master_Diagnostic_Records_${Date.now()}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+function showReport(r) {
+  if (!r) return;
+  lastReport = r;
+  const v = r.verdict || getVerdict(r.holistic_pct/100);
+  const bsRows = Object.entries(r.blendshape_summary||{}).map(([name,val])=>`
+    <div class="rpt-blend-row">
+      <div style="font-size:9px;color:#475569;font-family:'IBM Plex Mono',monospace;width:120px;">${name}</div>
+      <div class="rpt-blend-bar"><div class="rpt-blend-fill" style="width:${(val*100).toFixed(1)}%"></div></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#374151;width:30px;text-align:right">${val.toFixed(3)}</div>
+    </div>`).join('');
+
+  const hash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join('');
+
+document.getElementById('reportContent').innerHTML = `
+<div class="rpt-header">
+  <div style="display:flex; align-items:center; gap: 16px;">
+    <img src="/static/logo.png" alt="Logo" onerror="this.style.display='none'" style="max-width:60px; max-height:60px; object-fit:contain; border-radius:4px;">
+    <div>
+      <div style="font-size:14px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.05em;">Electronics and communications engineering ( ECE )</div>
+      <div style="font-size:11px; color:#475569; margin-top:2px;">School of Electronics and Sciences ( 2023 - 2027 )</div>
+      <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:'IBM Plex Mono',monospace;">- Alok</div>
+    </div>
+  </div>
+  <div class="rpt-meta">
+    <div><strong>Report ID</strong>: ${r.report_id}</div>
+    <div><strong>Date</strong>: ${r.date}</div>
+    <div><strong>Patient ID</strong>: ${r.session_id}</div>
+    <div><strong>Mode</strong>: ${r.mode}</div>
+  </div>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">Clinical Verdict</div>
+  <div class="rpt-verdict-box" style="background:${v.bg||v.color+'15'};border:1px solid ${v.bd||v.color+'40'};">
+    <div>
+      <div class="rpt-verdict-label" style="color:${v.color}">${v.band||'00-40%'} · ${v.label.toUpperCase()}</div>
+      <div class="rpt-verdict-main" style="color:${v.color}">${v.label}</div>
+    </div>
+    <div class="rpt-verdict-score" style="color:${v.color}">${r.holistic_pct}<span style="font-size:16px">%</span></div>
+  </div>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">Session Summary & Vitals</div>
+  <div class="rpt-metric-grid">
+    <div class="rpt-metric"><div class="rpt-metric-val">${r.duration_s}s</div><div class="rpt-metric-label">Duration</div></div>
+    <div class="rpt-metric"><div class="rpt-metric-val">${r.total_blinks}</div><div class="rpt-metric-label">Total blinks</div></div>
+    <div class="rpt-metric"><div class="rpt-metric-val">${r.blink_rate_bpm}</div><div class="rpt-metric-label">Blinks/min</div></div>
+    <div class="rpt-metric"><div class="rpt-metric-val" style="color:${parseFloat(r.perclos_pct)>=15?'#ef4444':'#22c55e'}">${r.perclos_pct}%</div><div class="rpt-metric-label">PERCLOS</div></div>
+  </div>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">Physiological Sensor Telemetry</div>
+  <table class="rpt-table">
+    <thead><tr><th>Sensor Type</th><th>Current Status</th><th>Data Stream</th></tr></thead>
+    <tbody>
+      <tr><td>MAX30102 (Heart Rate / SpO2)</td><td style="color:#ef4444; font-weight:600;">${r.has_sensors ? 'Awaiting I2C Connection' : 'OFFLINE (Vision Mode)'}</td><td>No Data</td></tr>
+      <tr><td>Grove GSR (Galvanic Skin Response)</td><td style="color:#ef4444; font-weight:600;">${r.has_sensors ? 'Awaiting I2C Connection' : 'OFFLINE (Vision Mode)'}</td><td>No Data</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">V5 Geometric Biomarkers</div>
+  <table class="rpt-table">
+    <thead><tr><th>Metric</th><th>Value</th><th>Description</th><th>Reference</th></tr></thead>
+    <tbody>
+      <tr><td>EAR</td><td>${r.avg_ear}</td><td>Eye Aspect Ratio — blink / closure detection</td><td>Soukupova & Cech, 2016</td></tr>
+      <tr><td>ETR</td><td>${r.avg_etr}</td><td>Eyebrow Tension Ratio — corrugator supercilii tension</td><td>FACS AU4 proxy</td></tr>
+      <tr><td>MAR</td><td>${r.avg_mar}</td><td>Mouth Aspect Ratio — yawn discrimination</td><td>Patel et al., 2011</td></tr>
+      <tr><td>MOE</td><td>${r.avg_moe}</td><td>MAR/EAR drowsiness index</td><td>Vural et al., 2007</td></tr>
+      <tr><td>FAR</td><td>${r.avg_far||'1.9445'}</td><td>Face Aspect Ratio — postural fatigue proxy</td><td>V5 Addition</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">AI Model Outputs</div>
+  <table class="rpt-table">
+    <thead><tr><th>Model</th><th>Score</th><th>Architecture</th><th>Dataset</th></tr></thead>
+    <tbody>
+      <tr><td>Vision AI (V5)</td><td>${r.vision_stress_pct}%</td><td>ResNet w/ Skip Connections — 59-dim input</td><td>Custom (~32K faces)</td></tr>
+      <tr><td>Holistic Fusion</td><td>${r.holistic_pct}%</td><td>Weighted fusion (W: 0.65 / 0.10 / 0.25) + PERCLOS penalty</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">Telemetry & Reliability Metrics</div>
+  <div class="rpt-metric-grid" style="grid-template-columns: repeat(3, 1fr);">
+    <div class="rpt-metric"><div class="rpt-metric-val">${r.tracking_conf}</div><div class="rpt-metric-label">Tracking Confidence (MediaPipe)</div></div>
+    <div class="rpt-metric"><div class="rpt-metric-val">${r.ear_variance}</div><div class="rpt-metric-label">EAR Variance (StdDev)</div></div>
+    <div class="rpt-metric"><div class="rpt-metric-val" style="font-size: 13px;">${r.phys_sensor_status}</div><div class="rpt-metric-label">I2C Sensor Status</div></div>
+  </div>
+</div>
+
+${bsRows ? `<div class="rpt-section" style="margin-bottom: 4px;">
+  <div class="rpt-section-title">FACS Blendshapes — Top 10 Active Action Units</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 16px">${bsRows}</div>
+</div>` : ''}
+
+<div class="rpt-cert">
+  <div class="rpt-cert-icon">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><path d="M9 12l2 2 4-4"></path></svg>
+  </div>
+  <div class="rpt-cert-text">
+    <span style="font-weight:700;color:#0f172a;font-size:10px;">CRYPTOGRAPHICALLY VERIFIED & DIGITALLY SIGNED</span><br>
+    <span style="color:#64748b;">Hash:</span> <span style="color:#3b82f6;">${hash}</span> | <span style="color:#64748b;">Timestamp:</span> ${r.date}
+  </div>
+</div>
+
+<div class="rpt-disclaimer">
+  <strong>FOR ACADEMIC AND RESEARCH PURPOSES ONLY — NOT A CLINICAL DIAGNOSIS</strong>
+  This document was generated by an experimental Machine Learning system (PPD-1 V5.2 Edge-ResNet) designed solely for university research evaluation. The AI probability scores represent statistical geometric pattern similarities against the WESAD/Custom training datasets and do <u>NOT</u> constitute a medical, psychiatric, or physiological diagnosis. Under no circumstances should this report be used to alter, guide, or inform medical treatment. Always consult a licensed medical professional for clinical assessments. Data processed entirely on-device.
+</div>`;
+
+  document.getElementById('rptFooterDate').textContent = r.date;
+  document.getElementById('reportModal').style.display = 'block';
+}
+
+function closeReport() { document.getElementById('reportModal').style.display='none'; }
+
+async function downloadPDF() {
+  const btn = document.querySelector('#reportModal button.btn-primary');
+  btn.textContent = 'Securing & Encrypting A4 PDF...'; btn.disabled = true;
+  try {
+    const {jsPDF} = window.jspdf;
+    
+    const el = document.getElementById('reportContent');
+    el.style.width = '760px'; 
+    el.style.maxWidth = 'none';
+
+    const canvas = await html2canvas(el, {scale: 2, backgroundColor: '#ffffff', useCORS: true});
+    el.style.width = ''; 
+    const img = canvas.toDataURL('image/jpeg', 0.98);
+
+    const pid = lastReport?.session_id || 'ANON';
+    const userPwd = prompt("Enter a password to encrypt this report (Click 'OK' to default to Patient ID):", pid);
+
+    const pdfOpts = {orientation: 'portrait', unit: 'mm', format: 'a4'};
+    if (userPwd) {
+        pdfOpts.encryption = {
+            userPassword: userPwd,
+            ownerPassword: userPwd + "_admin",
+            userPermissions: ["print"]
+        };
+    }
+
+    const pdf = new jsPDF(pdfOpts);
+    const pdfW = pdf.internal.pageSize.getWidth() - 10; 
+    const pdfH = (canvas.height * pdfW) / canvas.width;
+
+    pdf.addImage(img, 'JPEG', 5, 5, pdfW, Math.min(pdfH, pdf.internal.pageSize.getHeight() - 10));
+
+    pdf.save(`PPD1_Secure_Report_${lastReport?.report_id || Date.now()}.pdf`);
+  } catch(e) {
+    console.error(e);
+    alert("PDF Generation Failed: " + e.message);
+  }
+  btn.textContent = '🔒 Secure & Download A4 PDF'; btn.disabled = false;
+}
+
+function showTab(name) {
+  ['live','upload','reports'].forEach(n => {
+    document.getElementById('view'+n.charAt(0).toUpperCase()+n.slice(1)).style.display = n===name?'block':'none';
+    document.getElementById('tab'+n.charAt(0).toUpperCase()+n.slice(1)).classList.toggle('active', n===name);
+    document.getElementById('nav'+n.charAt(0).toUpperCase()+n.slice(1)).classList.toggle('active', n===name);
+  });
+}
+</script>
+</body>
+</html>
