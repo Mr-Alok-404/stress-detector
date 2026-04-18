@@ -1,7 +1,7 @@
 """
 ======================================================================================
 PPD-1 FLASK WEB APPLICATION — app.py
-Version: 5.4 (Corrected Edge-ResNet Fusion Math)
+Version: 5.8 (Render Free-Tier Memory & Timeout Optimizations)
 ======================================================================================
 """
 
@@ -27,6 +27,10 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from scipy.spatial import distance as dist
 
+# ── Force TensorFlow to use minimal CPU memory for Render Free Tier ──
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
 warnings.filterwarnings("ignore")
 
 try:
@@ -35,9 +39,16 @@ try:
 except ImportError:
     TF_AVAILABLE = False
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MP_TASK_PATH = os.path.join(BASE_DIR, "face_landmarker.task")
+V5_MODEL_PATH = os.path.join(BASE_DIR, "vision_model_v5.tflite")
+V5_SCALER_PATH = os.path.join(BASE_DIR, "vision_scaler_v5.pkl")
+PHYS_MODEL_PATH = os.path.join(BASE_DIR, "stress_model.tflite")
+PHYS_SCALER_PATH = os.path.join(BASE_DIR, "scaler.pkl")
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024  
-UPLOAD_FOLDER = Path("uploads")
+UPLOAD_FOLDER = Path(BASE_DIR) / "uploads"
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
 EAR_THRESHOLD      = 0.20
@@ -57,13 +68,15 @@ v_scaler = p_scaler = v_interp = p_interp = detector = None
 
 def load_models():
     global MODELS_LOADED, v_scaler, p_scaler, v_interp, p_interp, detector
+    
+    print("[SYSTEM] Initializing AI Models using Absolute Paths...")
 
-    if not Path("face_landmarker.task").exists():
-        print("[WARNING] face_landmarker.task not found — running in SIMULATION mode.")
+    if not os.path.exists(MP_TASK_PATH):
+        print(f"[FATAL ERROR] {MP_TASK_PATH} not found!")
         MODELS_LOADED = False
         return
 
-    base_opts = python.BaseOptions(model_asset_path="face_landmarker.task")
+    base_opts = python.BaseOptions(model_asset_path=MP_TASK_PATH)
     lm_opts   = vision.FaceLandmarkerOptions(
         base_options=base_opts,
         num_faces=1,
@@ -74,24 +87,34 @@ def load_models():
     )
     detector = vision.FaceLandmarker.create_from_options(lm_opts)
 
-    if TF_AVAILABLE and Path("vision_model_v5.tflite").exists() and Path("vision_scaler_v5.pkl").exists():
-        with open("vision_scaler_v5.pkl", "rb") as f:
-            v_scaler = pickle.load(f)
-        v_interp = tf.lite.Interpreter(model_path="vision_model_v5.tflite")
-        v_interp.allocate_tensors()
-        print("[SYSTEM] V5 Vision ResNet loaded.")
-    else:
-        print("[WARNING] V5 Vision model not found — using surrogate model.")
+    if TF_AVAILABLE and os.path.exists(V5_MODEL_PATH) and os.path.exists(V5_SCALER_PATH):
+        try:
+            with open(V5_SCALER_PATH, "rb") as f:
+                v_scaler = pickle.load(f)
+            v_interp = tf.lite.Interpreter(model_path=V5_MODEL_PATH)
+            v_interp.allocate_tensors()
+            print("[SYSTEM] V5 Vision ResNet loaded successfully.")
+        except Exception as e:
+            print(f"[ERROR] Failed to load Vision Model. Error: {e}")
+            v_scaler = None
+            v_interp = None
 
-    if TF_AVAILABLE and Path("stress_model.tflite").exists() and Path("scaler.pkl").exists():
-        with open("scaler.pkl", "rb") as f:
-            p_scaler = pickle.load(f)
-        p_interp = tf.lite.Interpreter(model_path="stress_model.tflite")
-        p_interp.allocate_tensors()
-        print("[SYSTEM] Physical sensor AI (WESAD) loaded.")
+    if TF_AVAILABLE and os.path.exists(PHYS_MODEL_PATH) and os.path.exists(PHYS_SCALER_PATH):
+        try:
+            with open(PHYS_SCALER_PATH, "rb") as f:
+                p_scaler = pickle.load(f)
+            p_interp = tf.lite.Interpreter(model_path=PHYS_MODEL_PATH)
+            p_interp.allocate_tensors()
+            print("[SYSTEM] Physical sensor AI (WESAD) loaded successfully.")
+        except Exception as e:
+            print(f"[ERROR] Failed to load Physical Sensor AI. Error: {e}")
+            p_scaler = None
+            p_interp = None
 
     MODELS_LOADED = (detector is not None)
     print(f"[SYSTEM] PPD-1 V5 Engine ready. Models loaded: {MODELS_LOADED}")
+
+load_models()
 
 def calc_ear(eye_pts: np.ndarray) -> float:
     A = dist.euclidean(eye_pts[1], eye_pts[5])
@@ -100,26 +123,17 @@ def calc_ear(eye_pts: np.ndarray) -> float:
     return (A + B) / (2.0 * C) if C > 1e-6 else 0.0
 
 def check_dark_circles_lab(frame, landmarks, w, h):
-    """Restored LAB conversion logic from V5 python script to extract luminance"""
     try:
         lab_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l_channel = lab_frame[:, :, 0] 
-        
         l_eye_y, l_eye_x = int(landmarks[145].y * h), int(landmarks[145].x * w)
         l_cheek_y, l_cheek_x = int(landmarks[205].y * h), int(landmarks[205].x * w)
         r_eye_y, r_eye_x = int(landmarks[374].y * h), int(landmarks[374].x * w)
         r_cheek_y, r_cheek_x = int(landmarks[425].y * h), int(landmarks[425].x * w)
         
-        l_eye_lum = np.mean(l_channel[max(0, l_eye_y-5):l_eye_y+5, max(0, l_eye_x-5):l_eye_x+5])
-        l_cheek_lum = np.mean(l_channel[max(0, l_cheek_y-5):l_cheek_y+5, max(0, l_cheek_x-5):l_cheek_x+5])
-        r_eye_lum = np.mean(l_channel[max(0, r_eye_y-5):r_eye_y+5, max(0, r_eye_x-5):r_eye_x+5])
-        r_cheek_lum = np.mean(l_channel[max(0, r_cheek_y-5):r_cheek_y+5, max(0, r_cheek_x-5):r_cheek_x+5])
-        
-        l_ratio = l_eye_lum / (l_cheek_lum + 1e-6)
-        r_ratio = r_eye_lum / (r_cheek_lum + 1e-6)
-        
-        flag = 1.0 if (l_ratio < 0.85 or r_ratio < 0.85) else 0.0
-        return flag
+        l_ratio = np.mean(l_channel[max(0, l_eye_y-5):l_eye_y+5, max(0, l_eye_x-5):l_eye_x+5]) / (np.mean(l_channel[max(0, l_cheek_y-5):l_cheek_y+5, max(0, l_cheek_x-5):l_cheek_x+5]) + 1e-6)
+        r_ratio = np.mean(l_channel[max(0, r_eye_y-5):r_eye_y+5, max(0, r_eye_x-5):r_eye_x+5]) / (np.mean(l_channel[max(0, r_cheek_y-5):r_cheek_y+5, max(0, r_cheek_x-5):r_cheek_x+5]) + 1e-6)
+        return 1.0 if (l_ratio < 0.85 or r_ratio < 0.85) else 0.0
     except:
         return 0.0
 
@@ -127,77 +141,36 @@ def compute_v5_features(lm: list, blendshapes: list, h: int, w: int) -> dict:
     l_eye = np.array([(lm[i].x * w, lm[i].y * h) for i in LEFT_EYE])
     r_eye = np.array([(lm[i].x * w, lm[i].y * h) for i in RIGHT_EYE])
     ear   = (calc_ear(l_eye) + calc_ear(r_eye)) / 2.0
-
     pt_lb = np.array([lm[LEFT_BROW].x * w,  lm[LEFT_BROW].y * h])
     pt_rb = np.array([lm[RIGHT_BROW].x * w, lm[RIGHT_BROW].y * h])
-
-    outer_l  = np.array([lm[OUTER_EYES[0]].x * w, lm[OUTER_EYES[0]].y * h])
-    outer_r  = np.array([lm[OUTER_EYES[1]].x * w, lm[OUTER_EYES[1]].y * h])
-    face_w   = dist.euclidean(outer_l, outer_r) + 1e-6
-
+    face_w   = dist.euclidean(np.array([lm[OUTER_EYES[0]].x * w, lm[OUTER_EYES[0]].y * h]), np.array([lm[OUTER_EYES[1]].x * w, lm[OUTER_EYES[1]].y * h])) + 1e-6
     etr = dist.euclidean(pt_lb, pt_rb) / face_w
-
-    mouth_h = dist.euclidean((lm[MOUTH_TOP].x * w, lm[MOUTH_TOP].y * h), (lm[MOUTH_BOTTOM].x * w, lm[MOUTH_BOTTOM].y * h))
     mouth_w_val = dist.euclidean((lm[MOUTH_LEFT].x * w, lm[MOUTH_LEFT].y * h), (lm[MOUTH_RIGHT].x * w, lm[MOUTH_RIGHT].y * h))
-    mar = mouth_h / mouth_w_val if mouth_w_val > 1e-6 else 0.0
-
-    moe         = mar / ear if ear > 1e-6 else 0.0
-    l_brow_eye  = dist.euclidean(pt_lb, np.mean(l_eye, axis=0)) / face_w
-    r_brow_eye  = dist.euclidean(pt_rb, np.mean(r_eye, axis=0)) / face_w
-    far         = dist.euclidean((lm[10].x * w, lm[10].y * h), (lm[152].x * w, lm[152].y * h)) / face_w
-
+    mar = dist.euclidean((lm[MOUTH_TOP].x * w, lm[MOUTH_TOP].y * h), (lm[MOUTH_BOTTOM].x * w, lm[MOUTH_BOTTOM].y * h)) / mouth_w_val if mouth_w_val > 1e-6 else 0.0
+    moe = mar / ear if ear > 1e-6 else 0.0
+    far = dist.euclidean((lm[10].x * w, lm[10].y * h), (lm[152].x * w, lm[152].y * h)) / face_w
     blend_scores = [b.score for b in blendshapes] if blendshapes else [0.0] * 52
-    blend_scores = (blend_scores + [0.0] * 52)[:52]
-
-    geom = [ear, etr, mar, moe, l_brow_eye, r_brow_eye, far]
-    v5_vector = np.array(geom + blend_scores, dtype=np.float32)
-
-    return {
-        "ear": round(float(ear), 4),
-        "etr": round(float(etr), 4),
-        "mar": round(float(mar), 4),
-        "moe": round(float(moe), 4),
-        "far": round(float(far), 4),
-        "v5_vector": v5_vector,
-        "blendshapes": {b.category_name: round(b.score, 4) for b in blendshapes} if blendshapes else {},
-    }
+    v5_vector = np.array([ear, etr, mar, moe, dist.euclidean(pt_lb, np.mean(l_eye, axis=0)) / face_w, dist.euclidean(pt_rb, np.mean(r_eye, axis=0)) / face_w, far] + (blend_scores + [0.0] * 52)[:52], dtype=np.float32)
+    return {"ear": float(ear), "etr": float(etr), "mar": float(mar), "moe": float(moe), "far": float(far), "v5_vector": v5_vector, "blendshapes": {b.category_name: round(b.score, 4) for b in blendshapes} if blendshapes else {}}
 
 def run_vision_model(v5_vector: np.ndarray) -> float:
     if v_scaler is not None and v_interp is not None:
         try:
-            v_in  = v_interp.get_input_details()
-            v_out = v_interp.get_output_details()
-            scaled = v_scaler.transform([v5_vector]).astype(np.float32)
-            v_interp.set_tensor(v_in[0]["index"], scaled)
+            v_interp.set_tensor(v_interp.get_input_details()[0]["index"], v_scaler.transform([v5_vector]).astype(np.float32))
             v_interp.invoke()
-            raw = float(v_interp.get_tensor(v_out[0]["index"])[0][0])
-            return float(np.clip(raw, 0.0, 1.0))
-        except Exception:
-            pass
-
-    # Aggressive Surrogate Math (if TFLite is missing)
-    ear = float(v5_vector[0]); etr = float(v5_vector[1])
-    mar = float(v5_vector[2]); moe = float(v5_vector[3])
-    
-    ear_score = max(0.0, (0.28 - ear) / 0.15) * 0.45
-    etr_score = max(0.0, (0.42 - etr) / 0.15) * 0.35
-    mar_score = min(1.0, mar * 2.5) * 0.20
-    return float(np.clip(ear_score + etr_score + mar_score, 0.0, 1.0))
+            return float(np.clip(float(v_interp.get_tensor(v_interp.get_output_details()[0]["index"])[0][0]), 0.0, 1.0))
+        except: pass
+    ear, etr, mar, moe = float(v5_vector[0]), float(v5_vector[1]), float(v5_vector[2]), float(v5_vector[3])
+    return float(np.clip(max(0.0, (0.28 - ear) / 0.15) * 0.45 + max(0.0, (0.42 - etr) / 0.15) * 0.35 + min(1.0, mar * 2.5) * 0.20, 0.0, 1.0))
 
 def run_physiology_model(gsr: float, hrv: float, hr: float) -> float:
     if p_scaler is not None and p_interp is not None:
         try:
-            p_in  = p_interp.get_input_details()
-            p_out = p_interp.get_output_details()
-            scaled = p_scaler.transform([[gsr, hrv, hr]]).astype(np.float32)
-            p_interp.set_tensor(p_in[0]["index"], scaled)
+            p_interp.set_tensor(p_interp.get_input_details()[0]["index"], p_scaler.transform([[gsr, hrv, hr]]).astype(np.float32))
             p_interp.invoke()
-            return float(np.clip(p_interp.get_tensor(p_out[0]["index"])[0][0], 0.0, 1.0))
-        except Exception:
-            pass
-    gsr_s = min(1.0, (gsr - 2.0) / 10.0)
-    hr_s  = min(1.0, (hr  - 60.0) / 60.0)
-    return float(np.clip(gsr_s * 0.55 + hr_s * 0.45, 0.0, 1.0))
+            return float(np.clip(float(p_interp.get_tensor(p_interp.get_output_details()[0]["index"])[0][0]), 0.0, 1.0))
+        except: pass
+    return float(np.clip(min(1.0, (gsr - 2.0) / 10.0) * 0.55 + min(1.0, (hr  - 60.0) / 60.0) * 0.45, 0.0, 1.0))
 
 def get_medical_category(probability: float) -> dict:
     p = float(np.clip(probability, 0.0, 1.0)) * 100
@@ -208,48 +181,27 @@ def get_medical_category(probability: float) -> dict:
     else: return {"label": "Critical", "sub": "Consult Specialist", "band": "86–100%", "color": "#ef4444", "bg": "rgba(239,68,68,0.08)", "bd": "rgba(239,68,68,0.22)"}
 
 def compute_holistic_score(v_prob: float, dc_flag: float, p_prob: float | None, perclos: float) -> float:
-    """Fixed mathematical logic mapping directly to the V5 engine."""
-    # V5 ResNet is the primary driver. Dark circles act as a flat 5% fatigue penalty.
-    fatigue_penalty = dc_flag * 0.05
-    score = v_prob + fatigue_penalty
-    
-    # Optional physiological blending if in hybrid mode
-    if p_prob is not None:
-        score = (score * 0.70) + (p_prob * 0.30)
-        
-    # PERCLOS penalty (NHTSA standard)
-    if perclos >= PERCLOS_THRESHOLD: 
-        score += (perclos - PERCLOS_THRESHOLD) * 0.5
-        
+    score = v_prob + (dc_flag * 0.05)
+    if p_prob is not None: score = (score * 0.70) + (p_prob * 0.30)
+    if perclos >= PERCLOS_THRESHOLD: score += (perclos - PERCLOS_THRESHOLD) * 0.5
     return float(np.clip(score, 0.0, 1.0))
 
 def process_frame(frame_bgr: np.ndarray) -> dict:
-    if detector is None: return {"face_detected": False}
+    if detector is None: 
+        return {"face_detected": False, "error": "Server AI models failed to load. Check logs."}
 
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-    mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result = detector.detect(mp_img)
+    result = detector.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
 
-    if not result.face_landmarks: return {"face_detected": False}
+    if not result.face_landmarks: 
+        return {"face_detected": False}
 
     lm = result.face_landmarks[0]
-    blendshapes = result.face_blendshapes[0] if result.face_blendshapes else []
     h, w, _ = frame_bgr.shape
-
-    feats = compute_v5_features(lm, blendshapes, h, w)
+    feats = compute_v5_features(lm, result.face_blendshapes[0] if result.face_blendshapes else [], h, w)
     dc_flag = check_dark_circles_lab(frame_bgr, lm, w, h)
     v_prob = run_vision_model(feats["v5_vector"])
-    
-    # Calculate real-time holistic without physiological data
     holistic = compute_holistic_score(v_prob, dc_flag, None, 0.0)
-
-    mesh = {
-        "l_eye": [{"x": lm[i].x, "y": lm[i].y} for i in LEFT_EYE],
-        "r_eye": [{"x": lm[i].x, "y": lm[i].y} for i in RIGHT_EYE],
-        "l_brow": {"x": lm[LEFT_BROW].x, "y": lm[LEFT_BROW].y},
-        "r_brow": {"x": lm[RIGHT_BROW].x, "y": lm[RIGHT_BROW].y},
-        "mouth": [{"x": lm[13].x, "y": lm[13].y}, {"x": lm[14].x, "y": lm[14].y}, {"x": lm[61].x, "y": lm[61].y}, {"x": lm[291].x, "y": lm[291].y}]
-    }
 
     return {
         "face_detected": True,
@@ -257,8 +209,7 @@ def process_frame(frame_bgr: np.ndarray) -> dict:
         "dc_flag": dc_flag,
         "v_prob": round(v_prob, 4), "holistic": round(holistic, 4),
         "blendshapes": feats["blendshapes"],
-        "category": get_medical_category(holistic),
-        "mesh": mesh
+        "category": get_medical_category(holistic)
     }
 
 sessions: dict[str, dict] = {}
@@ -276,12 +227,9 @@ def build_report(sid: str, session_meta: dict, sensor_data: dict | None = None) 
     avg = lambda key: round(float(np.mean([f[key] for f in frames if key in f])), 4)
     v_p = avg("v_prob")
     dc_f = avg("dc_flag")
-    
-    buf = list(s.get("perclos_buf", []))
-    perc = round(float(sum(buf) / len(buf)) if buf else 0.0, 4)
+    perc = round(float(sum(list(s.get("perclos_buf", []))) / len(list(s.get("perclos_buf", [])))) if list(s.get("perclos_buf", [])) else 0.0, 4)
 
     p_prob = run_physiology_model(sensor_data.get("gsr", 4.5), sensor_data.get("hrv", 0.5), sensor_data.get("hr", 80.0)) if sensor_data else None
-    
     holistic = compute_holistic_score(v_p, dc_f, p_prob, perc)
     duration = session_meta.get("duration_s", 0)
     bpm_rate = round((s.get("blinks", 0) / duration * 60) if duration > 0 else 0.0, 1)
@@ -317,42 +265,45 @@ def index(): return render_template("index.html")
 
 @app.route("/api/analyze/live", methods=["POST"])
 def analyze_live():
-    data = request.get_json(force=True)
-    b64 = data.get("frame", "")
-    sid = data.get("session_id", "default")
-    phys = data.get("sensor", None)  
+    try:
+        data = request.get_json(force=True)
+        b64 = data.get("frame", "")
+        sid = data.get("session_id", "default")
+        phys = data.get("sensor", None)  
 
-    img_bytes = base64.b64decode(b64.split(",")[-1])
-    arr = np.frombuffer(img_bytes, dtype=np.uint8)
-    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-    if frame is None: return jsonify({"error": "Invalid frame"}), 400
+        img_bytes = base64.b64decode(b64.split(",")[-1])
+        arr = np.frombuffer(img_bytes, dtype=np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        if frame is None: return jsonify({"error": "Failed to decode frame from frontend."})
+        
+        metrics = process_frame(frame)
+        if "error" in metrics: return jsonify(metrics)
 
-    metrics = process_frame(frame)
+        if metrics.get("face_detected"):
+            sess = get_or_create_session(sid)
+            sess["frames"].append(metrics)
+            ear = metrics.get("ear", 1.0)
+            if ear < EAR_THRESHOLD:
+                if not sess["eye_closed"]: sess["blinks"] += 1; sess["eye_closed"] = True
+            else: sess["eye_closed"] = False
+                
+            sess["perclos_buf"].append(1 if ear < EAR_THRESHOLD else 0)
+            perclos = float(sum(list(sess["perclos_buf"])) / len(sess["perclos_buf"]))
+            metrics["perclos"] = round(perclos, 4)
+            metrics["blinks"] = sess["blinks"]
+            dc_val = metrics.get("dc_flag", 0.0)
 
-    if metrics.get("face_detected"):
-        sess = get_or_create_session(sid)
-        sess["frames"].append(metrics)
-        ear = metrics.get("ear", 1.0)
-        if ear < EAR_THRESHOLD:
-            if not sess["eye_closed"]: sess["blinks"] += 1; sess["eye_closed"] = True
-        else: sess["eye_closed"] = False
-            
-        sess["perclos_buf"].append(1 if ear < EAR_THRESHOLD else 0)
-        perclos = float(sum(list(sess["perclos_buf"])) / len(sess["perclos_buf"]))
-        metrics["perclos"] = round(perclos, 4)
-        metrics["blinks"] = sess["blinks"]
-
-        # Compute accurate holistic real-time score
-        if phys:
-            p_prob = run_physiology_model(phys.get("gsr", 4.5), phys.get("hrv", 0.5), phys.get("hr", 80.0))
-            metrics["p_prob"] = round(p_prob, 4)
-            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], metrics.get("dc_flag", 0.0), p_prob, perclos), 4)
-        else:
-            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], metrics.get("dc_flag", 0.0), None, perclos), 4)
-            
-        metrics["category"] = get_medical_category(metrics["holistic"])
-
-    return jsonify(metrics)
+            if phys:
+                p_prob = run_physiology_model(phys.get("gsr", 4.5), phys.get("hrv", 0.5), phys.get("hr", 80.0))
+                metrics["p_prob"] = round(p_prob, 4)
+                metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], dc_val, p_prob, perclos), 4)
+            else:
+                metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], dc_val, None, perclos), 4)
+                
+            metrics["category"] = get_medical_category(metrics["holistic"])
+        return jsonify(metrics)
+    except Exception as e:
+        return jsonify({"error": f"Server crash during frame processing: {str(e)}"})
 
 @app.route("/api/analyze/image", methods=["POST"])
 def analyze_image():
@@ -365,7 +316,6 @@ def analyze_image():
     frame = cv2.imread(str(path))
     metrics = process_frame(frame)
     path.unlink(missing_ok=True)
-
     if metrics.get("face_detected"):
         sess = get_or_create_session(sid)
         sess["frames"].append(metrics)
@@ -381,13 +331,11 @@ def analyze_video():
     pid = request.form.get("patient_id", "ANON")
     path = UPLOAD_FOLDER / f"{sid}_{f.filename}"
     f.save(str(path))
-
     cap = cv2.VideoCapture(str(path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     duration_s = round(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / fps, 1)
     sample_every = max(1, int(fps // 4))   
     sess = get_or_create_session(sid)
-
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
@@ -401,7 +349,6 @@ def analyze_video():
                 if not sess["eye_closed"]: sess["blinks"] += 1; sess["eye_closed"] = True
             else: sess["eye_closed"] = False
             sess["perclos_buf"].append(1 if ear < EAR_THRESHOLD else 0)
-
     cap.release()
     path.unlink(missing_ok=True)
     report = build_report(sid, {"patient_id": pid, "mode": "Video Analysis", "duration_s": duration_s})
@@ -421,5 +368,4 @@ def export_csv():
     return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv", as_attachment=True, download_name=f"PPD1_Records.csv")
 
 if __name__ == "__main__":
-    load_models()
     app.run(debug=True, host="127.0.0.1", port=5000, threaded=True)
