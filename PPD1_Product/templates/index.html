@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PPD-1 — Multimodal EMA Clinical Platform</title>
+<title>PPD-1 — Multimodal EMA Clinical Platform by Alok</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -670,7 +670,8 @@ function buildReport(dur) {
     holistic_pct: (vProb*100).toFixed(1),
     verdict: v, blendshape_summary: bsSummary,
     ear_variance: "±0.018", 
-    tracking_conf: "0.96"
+    tracking_conf: "0.96",
+    has_sensors: isHybrid
   };
 }
 
@@ -773,14 +774,14 @@ function showReport(r) {
 
   const hash = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b=>b.toString(16).padStart(2,'0')).join('');
 
-  document.getElementById('reportContent').innerHTML = `
+document.getElementById('reportContent').innerHTML = `
 <div class="rpt-header">
   <div style="display:flex; align-items:center; gap: 16px;">
     <img src="/static/logo.png" alt="Logo" onerror="this.style.display='none'" style="max-width:60px; max-height:60px; object-fit:contain; border-radius:4px;">
     <div>
-      <div style="font-size:14px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.05em;">Electronics and communications engineering ( ECE )</div>
-      <div style="font-size:11px; color:#475569; margin-top:2px;">School of Electronics and Sciences ( 2023 - 2027 )</div>
-      <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:'IBM Plex Mono',monospace;">- Alok</div>
+      <div style="font-size:12px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.05em;">ODISHA UNIVERSITY OF TECHNOLOGY AND RESEARCH</div>
+      <div style="font-size:11px; color:#475569; margin-top:2px;">School of Electronics Sciences </div>
+      <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:'IBM Plex Mono',monospace;">Electronic and Comuunication Engineering ( 2023 - 2027 )</div>
     </div>
   </div>
   <div class="rpt-meta">
@@ -803,13 +804,24 @@ function showReport(r) {
 </div>
 
 <div class="rpt-section">
-  <div class="rpt-section-title">Session Summary</div>
+  <div class="rpt-section-title">Session Summary & Vitals</div>
   <div class="rpt-metric-grid">
     <div class="rpt-metric"><div class="rpt-metric-val">${r.duration_s}s</div><div class="rpt-metric-label">Duration</div></div>
     <div class="rpt-metric"><div class="rpt-metric-val">${r.total_blinks}</div><div class="rpt-metric-label">Total blinks</div></div>
     <div class="rpt-metric"><div class="rpt-metric-val">${r.blink_rate_bpm}</div><div class="rpt-metric-label">Blinks/min</div></div>
     <div class="rpt-metric"><div class="rpt-metric-val" style="color:${parseFloat(r.perclos_pct)>=15?'#ef4444':'#22c55e'}">${r.perclos_pct}%</div><div class="rpt-metric-label">PERCLOS</div></div>
   </div>
+</div>
+
+<div class="rpt-section">
+  <div class="rpt-section-title">Physiological Sensor Telemetry</div>
+  <table class="rpt-table">
+    <thead><tr><th>Sensor Type</th><th>Current Status</th><th>Data Stream</th></tr></thead>
+    <tbody>
+      <tr><td>MAX30102 (Heart Rate / SpO2)</td><td style="color:#ef4444; font-weight:600;">${r.has_sensors ? 'Awaiting I2C Connection' : 'OFFLINE (Vision Mode)'}</td><td>No Data</td></tr>
+      <tr><td>Grove GSR (Galvanic Skin Response)</td><td style="color:#ef4444; font-weight:600;">${r.has_sensors ? 'Awaiting I2C Connection' : 'OFFLINE (Vision Mode)'}</td><td>No Data</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <div class="rpt-section">
