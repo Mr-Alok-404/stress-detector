@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PPD-1 — Multimodal EMA Clinical Platform by Alok</title>
+<title>PPD-1 — Multimodal EMA Clinical Platform</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -112,7 +112,7 @@ body{font-family:var(--sans);background:var(--bg);color:var(--text);font-size:13
 .report-table td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text);font-family:var(--mono)}
 
 .log-wrap{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;font-family:var(--mono);font-size:10px;max-height:140px;overflow-y:auto;line-height:1.7;margin-top:10px}
-.log-ok{color:var(--green)}.log-dim{color:var(--text3)}
+.log-ok{color:var(--green)}.log-dim{color:var(--text3)}.log-err{color:var(--red)}.log-warn{color:var(--amber)}
 
 .sensor-panel{background:var(--bg2);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
 .sp-header{padding:12px 14px 8px;border-bottom:1px solid var(--border);font-size:9px;font-weight:600;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;font-family:var(--mono)}
@@ -342,6 +342,16 @@ let sessionRunning = false, sessionStart = 0, sessionTimerInterval = null, simIn
 let totalBlinks = 0, lastEyeClosed = false, perclosBuf = [], sessionFrames = [], reportArchive = [], lastReport = null;
 let webcamActive = false, webcamStream = null;
 
+function log(msg, type='dim') {
+  const area = document.getElementById('logWrap');
+  if (!area) return;
+  const ts = new Date().toLocaleTimeString('en-GB');
+  const d = document.createElement('div');
+  d.className = 'log-' + type;
+  d.textContent = `[${ts}] ${msg}`;
+  area.prepend(d);
+}
+
 function toggleSensorsUI() {
     const isHybrid = document.getElementById('modeSelect').value === 'hybrid';
     const panel = document.getElementById('physPanelBlock');
@@ -486,7 +496,9 @@ async function startSession() {
       vid.srcObject = webcamStream; vid.style.display='block';
       document.getElementById('camPlaceholder').style.display='none';
       webcamActive = true;
+      log("Webcam activated successfully.", "ok");
     } catch(e) {
+      log("Camera access denied or HTTPS required: " + e.message, "err");
       alert("Camera access denied or HTTPS required."); return;
     }
   }
@@ -504,8 +516,11 @@ async function startSession() {
     document.getElementById('timerEl').textContent = `${String(Math.floor(e/60)).padStart(2,'0')}:${String(e%60).padStart(2,'0')}`;
   },1000);
 
-  if (src === 'webcam') sendWebcamFrames();
-  else simInterval = setInterval(simulateFrame, 150);
+  if (src === 'webcam') {
+      sendWebcamFrames();
+  } else {
+      simInterval = setInterval(simulateFrame, 150);
+  }
 }
 
 function stopSession() {
@@ -542,6 +557,7 @@ function simulateFrame() {
 }
 
 let frameCanvas = null;
+
 async function sendWebcamFrames() {
   if (!webcamActive || !sessionRunning) return;
   if (!frameCanvas) { frameCanvas=document.createElement('canvas'); frameCanvas.width=320; frameCanvas.height=240; }
@@ -552,17 +568,38 @@ async function sendWebcamFrames() {
 
   try {
     const res = await fetch('/api/analyze/live', {
-      method:'POST', body:JSON.stringify({
+      method:'POST', 
+      headers: {'Content-Type': 'application/json'},
+      body:JSON.stringify({
           frame: frameCanvas.toDataURL('image/jpeg', 0.7),
           session_id: document.getElementById('patSub').textContent,
           sensor: dummyPhys 
       })
     });
+    
+    if (!res.ok) {
+        log(`Server HTTP Error: ${res.status}`, "err");
+        if (sessionRunning) setTimeout(sendWebcamFrames, 1000);
+        return;
+    }
+    
     const data = await res.json();
+    
+    if (data.error) {
+        log(`Backend Error: ${data.error}`, "err");
+        if (sessionRunning) setTimeout(sendWebcamFrames, 1000);
+        return;
+    }
+    
     if (data.face_detected) {
       updateDataState(data.ear, data.etr, data.mar, data.moe, data.v_prob, isHybrid ? 5.0 : null, isHybrid ? 85 : null, true, data.blendshapes);
+    } else {
+      log("Camera active, but AI cannot detect a face.", "warn");
     }
-  } catch(e){}
+  } catch(e) {
+      log(`Network/Server error: ${e.message}`, "err");
+  }
+  
   if (sessionRunning) setTimeout(sendWebcamFrames, 300);
 }
 
@@ -779,9 +816,9 @@ document.getElementById('reportContent').innerHTML = `
   <div style="display:flex; align-items:center; gap: 16px;">
     <img src="/static/logo.png" alt="Logo" onerror="this.style.display='none'" style="max-width:60px; max-height:60px; object-fit:contain; border-radius:4px;">
     <div>
-      <div style="font-size:12px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.05em;">ODISHA UNIVERSITY OF TECHNOLOGY AND RESEARCH</div>
-      <div style="font-size:11px; color:#475569; margin-top:2px;">School of Electronics Sciences </div>
-      <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:'IBM Plex Mono',monospace;">Electronic and Comuunication Engineering ( 2023 - 2027 )</div>
+      <div style="font-size:14px; font-weight:700; color:#0f172a; text-transform:uppercase; letter-spacing:0.05em;">Electronics and communications engineering ( ECE )</div>
+      <div style="font-size:11px; color:#475569; margin-top:2px;">School of Electronics and Sciences ( 2023 - 2027 )</div>
+      <div style="font-size:10px; color:#64748b; margin-top:2px; font-family:'IBM Plex Mono',monospace;">- Alok</div>
     </div>
   </div>
   <div class="rpt-meta">
