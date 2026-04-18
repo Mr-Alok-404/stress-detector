@@ -1,7 +1,7 @@
 """
 ======================================================================================
 PPD-1 FLASK WEB APPLICATION — app.py
-Version: 5.6 (Perfected Math + Production Server Fixes)
+Version: 5.4 (Corrected Edge-ResNet Fusion Math)
 ======================================================================================
 """
 
@@ -57,8 +57,6 @@ v_scaler = p_scaler = v_interp = p_interp = detector = None
 
 def load_models():
     global MODELS_LOADED, v_scaler, p_scaler, v_interp, p_interp, detector
-    
-    print("[SYSTEM] Initializing AI Models for Production...")
 
     if not Path("face_landmarker.task").exists():
         print("[WARNING] face_landmarker.task not found — running in SIMULATION mode.")
@@ -76,39 +74,24 @@ def load_models():
     )
     detector = vision.FaceLandmarker.create_from_options(lm_opts)
 
-    # CRASH-PROOF TFLITE LOADING
     if TF_AVAILABLE and Path("vision_model_v5.tflite").exists() and Path("vision_scaler_v5.pkl").exists():
-        try:
-            with open("vision_scaler_v5.pkl", "rb") as f:
-                v_scaler = pickle.load(f)
-            v_interp = tf.lite.Interpreter(model_path="vision_model_v5.tflite")
-            v_interp.allocate_tensors()
-            print("[SYSTEM] V5 Vision ResNet loaded successfully.")
-        except Exception as e:
-            print(f"[ERROR] Failed to load Vision Model. Using surrogate. Error: {e}")
-            v_scaler = None
-            v_interp = None
+        with open("vision_scaler_v5.pkl", "rb") as f:
+            v_scaler = pickle.load(f)
+        v_interp = tf.lite.Interpreter(model_path="vision_model_v5.tflite")
+        v_interp.allocate_tensors()
+        print("[SYSTEM] V5 Vision ResNet loaded.")
     else:
         print("[WARNING] V5 Vision model not found — using surrogate model.")
 
     if TF_AVAILABLE and Path("stress_model.tflite").exists() and Path("scaler.pkl").exists():
-        try:
-            with open("scaler.pkl", "rb") as f:
-                p_scaler = pickle.load(f)
-            p_interp = tf.lite.Interpreter(model_path="stress_model.tflite")
-            p_interp.allocate_tensors()
-            print("[SYSTEM] Physical sensor AI (WESAD) loaded successfully.")
-        except Exception as e:
-            print(f"[ERROR] Failed to load Physical Sensor AI. Error: {e}")
-            p_scaler = None
-            p_interp = None
+        with open("scaler.pkl", "rb") as f:
+            p_scaler = pickle.load(f)
+        p_interp = tf.lite.Interpreter(model_path="stress_model.tflite")
+        p_interp.allocate_tensors()
+        print("[SYSTEM] Physical sensor AI (WESAD) loaded.")
 
     MODELS_LOADED = (detector is not None)
     print(f"[SYSTEM] PPD-1 V5 Engine ready. Models loaded: {MODELS_LOADED}")
-
-# GUNICORN FIX: Load models globally on server boot
-load_models()
-
 
 def calc_ear(eye_pts: np.ndarray) -> float:
     A = dist.euclidean(eye_pts[1], eye_pts[5])
@@ -117,6 +100,7 @@ def calc_ear(eye_pts: np.ndarray) -> float:
     return (A + B) / (2.0 * C) if C > 1e-6 else 0.0
 
 def check_dark_circles_lab(frame, landmarks, w, h):
+    """Restored LAB conversion logic from V5 python script to extract luminance"""
     try:
         lab_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
         l_channel = lab_frame[:, :, 0] 
@@ -194,6 +178,7 @@ def run_vision_model(v5_vector: np.ndarray) -> float:
     # Aggressive Surrogate Math (if TFLite is missing)
     ear = float(v5_vector[0]); etr = float(v5_vector[1])
     mar = float(v5_vector[2]); moe = float(v5_vector[3])
+    
     ear_score = max(0.0, (0.28 - ear) / 0.15) * 0.45
     etr_score = max(0.0, (0.42 - etr) / 0.15) * 0.35
     mar_score = min(1.0, mar * 2.5) * 0.20
@@ -222,9 +207,6 @@ def get_medical_category(probability: float) -> dict:
     elif p <= 85: return {"label": "Acute Fatigue / Stress", "sub": "High", "band": "71–85%", "color": "#f97316", "bg": "rgba(249,115,22,0.08)", "bd": "rgba(249,115,22,0.22)"}
     else: return {"label": "Critical", "sub": "Consult Specialist", "band": "86–100%", "color": "#ef4444", "bg": "rgba(239,68,68,0.08)", "bd": "rgba(239,68,68,0.22)"}
 
-# =====================================================================
-# YOUR ACCURATE V5.4 MATH RESTORED BELOW
-# =====================================================================
 def compute_holistic_score(v_prob: float, dc_flag: float, p_prob: float | None, perclos: float) -> float:
     """Fixed mathematical logic mapping directly to the V5 engine."""
     # V5 ResNet is the primary driver. Dark circles act as a flat 5% fatigue penalty.
@@ -255,12 +237,10 @@ def process_frame(frame_bgr: np.ndarray) -> dict:
     h, w, _ = frame_bgr.shape
 
     feats = compute_v5_features(lm, blendshapes, h, w)
-    
-    # RESTORED: Actively check for dark circles instead of forcing 0.0
     dc_flag = check_dark_circles_lab(frame_bgr, lm, w, h)
     v_prob = run_vision_model(feats["v5_vector"])
     
-    # RESTORED: Pass dc_flag to the restored holistic math
+    # Calculate real-time holistic without physiological data
     holistic = compute_holistic_score(v_prob, dc_flag, None, 0.0)
 
     mesh = {
@@ -301,6 +281,7 @@ def build_report(sid: str, session_meta: dict, sensor_data: dict | None = None) 
     perc = round(float(sum(buf) / len(buf)) if buf else 0.0, 4)
 
     p_prob = run_physiology_model(sensor_data.get("gsr", 4.5), sensor_data.get("hrv", 0.5), sensor_data.get("hr", 80.0)) if sensor_data else None
+    
     holistic = compute_holistic_score(v_p, dc_f, p_prob, perc)
     duration = session_meta.get("duration_s", 0)
     bpm_rate = round((s.get("blinks", 0) / duration * 60) if duration > 0 else 0.0, 1)
@@ -361,15 +342,13 @@ def analyze_live():
         metrics["perclos"] = round(perclos, 4)
         metrics["blinks"] = sess["blinks"]
 
-        # RESTORED: Pass dc_flag properly so it affects the live score!
-        dc_val = metrics.get("dc_flag", 0.0)
-
+        # Compute accurate holistic real-time score
         if phys:
             p_prob = run_physiology_model(phys.get("gsr", 4.5), phys.get("hrv", 0.5), phys.get("hr", 80.0))
             metrics["p_prob"] = round(p_prob, 4)
-            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], dc_val, p_prob, perclos), 4)
+            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], metrics.get("dc_flag", 0.0), p_prob, perclos), 4)
         else:
-            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], dc_val, None, perclos), 4)
+            metrics["holistic"] = round(compute_holistic_score(metrics["v_prob"], metrics.get("dc_flag", 0.0), None, perclos), 4)
             
         metrics["category"] = get_medical_category(metrics["holistic"])
 
@@ -442,4 +421,5 @@ def export_csv():
     return send_file(io.BytesIO(buf.getvalue().encode()), mimetype="text/csv", as_attachment=True, download_name=f"PPD1_Records.csv")
 
 if __name__ == "__main__":
+    load_models()
     app.run(debug=True, host="127.0.0.1", port=5000, threaded=True)
